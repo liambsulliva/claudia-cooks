@@ -1,5 +1,6 @@
 # Created by https://www.toptal.com/developers/gitignore/api/swift
 # Edit at https://www.toptal.com/developers/gitignore?templates=swift
+.vscode/
 
 ### Swift ###
 # Xcode
@@ -15,6 +16,7 @@ xcuserdata/
 
 ## compatibility with Xcode 3 and earlier (ignoring not required starting Xcode 4)
 build/
+
 DerivedData/
 *.moved-aside
 *.pbxuser
@@ -49,6 +51,7 @@ playground.xcworkspace
 # .swiftpm
 
 .build/
+buildServer.json
 
 # CocoaPods
 # We recommend against adding the Pods directory to your .gitignore. However
