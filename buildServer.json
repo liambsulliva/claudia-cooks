@@ -12,8 +12,8 @@
 	"argv": [
 		"/opt/homebrew/bin/xcode-build-server"
 	],
-	"workspace": "/Users/liambsulliva/Developer/recipe-app/recipe-app.xcodeproj/project.xcworkspace",
-	"build_root": "/Users/liambsulliva/Library/Developer/Xcode/DerivedData/recipe-app-ftfibhjdvlvyxhbbezxofvksrxjo",
-	"scheme": "recipe-app",
+	"workspace": "/Users/liambsulliva/Developer/claudia-cooks/claudia-cooks.xcodeproj/project.xcworkspace",
+	"build_root": "/Users/liambsulliva/Library/Developer/Xcode/DerivedData/claudia-cooks-fbakfbxutmsttydvoyuwbankmhzg",
+	"scheme": "claudia-cooks",
 	"kind": "xcode"
 }
