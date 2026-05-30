@@ -31,6 +31,7 @@ struct ContentView: View {
                 frameworkPickerRoot
             }
         }
+        .modifier(BuilderMinimumWindowSize(mode: windowMode))
         .windowChrome(mode: windowMode)
         .onAppear(perform: openBuilderIfRecipesExist)
     }
@@ -59,6 +60,22 @@ struct ContentView: View {
         )
         .fixedSize()
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+}
+
+private struct BuilderMinimumWindowSize: ViewModifier {
+    let mode: AppWindowMode
+
+    func body(content: Content) -> some View {
+        switch mode {
+        case .builder:
+            content.frame(
+                minWidth: AppWindowMetrics.builderMinimumSize.width,
+                minHeight: AppWindowMetrics.builderMinimumSize.height
+            )
+        case .frameworkPicker:
+            content
+        }
     }
 }
 

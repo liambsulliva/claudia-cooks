@@ -70,10 +70,11 @@ struct StackedPaperPreview: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
             .padding(.trailing, trailingPadding)
+            .clipped()
             .padding(.bottom, hasRaisedStack ? 0 : -140)
+            .animation(nil, value: layout.width)
+            .animation(nil, value: layout.height)
             .animation(.spring(response: 0.58, dampingFraction: 0.82), value: stackAnimationKey)
-            .animation(.spring(response: 0.42, dampingFraction: 0.86), value: layout.width)
-            .animation(.spring(response: 0.42, dampingFraction: 0.86), value: layout.height)
             .animation(.spring(response: 0.72, dampingFraction: 0.78), value: hasRaisedStack)
             .onAppear {
                 hasRaisedStack = false

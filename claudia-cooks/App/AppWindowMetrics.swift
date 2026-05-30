@@ -12,5 +12,5 @@ enum AppWindowMode: Equatable {
 
 enum AppWindowMetrics {
     static let pickerSize = CGSize(width: 900, height: 680)
-    static let builderMinimumSize = CGSize(width: 1100, height: 760)
+    static let builderMinimumSize = CGSize(width: 900, height: 600)
 }

@@ -14,7 +14,10 @@ enum FrameworkBuildScreenLayout {
     static let centerStageCornerRadius: CGFloat = 18
     static let centerStageHorizontalInset: CGFloat = 24
     static let centerStageTopInset: CGFloat = 16
-    static let builderPaperSpacing: CGFloat = 64
+    static let builderPaperSpacing: CGFloat = 32
     static let defaultBuilderPanelWidth: CGFloat = 640
+    static let maxBuilderPanelWidth: CGFloat = 800
+    static let minBuilderPanelWidth: CGFloat = 500
     static let defaultPreviewPanelWidth: CGFloat = 520
+    static let paperStackTrailingMargin: CGFloat = 24
 }

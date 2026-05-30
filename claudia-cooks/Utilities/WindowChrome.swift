@@ -12,6 +12,32 @@ extension View {
     }
 }
 
+private final class WindowSizeDelegate: NSObject, NSWindowDelegate {
+    var mode: AppWindowMode = .frameworkPicker
+
+    func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
+        switch mode {
+        case .frameworkPicker:
+            contentFrameSize(for: AppWindowMetrics.pickerSize, in: sender)
+        case .builder:
+            let minimumFrame = contentFrameSize(
+                for: AppWindowMetrics.builderMinimumSize,
+                in: sender
+            )
+            return NSSize(
+                width: max(frameSize.width, minimumFrame.width),
+                height: max(frameSize.height, minimumFrame.height)
+            )
+        }
+        return frameSize
+    }
+
+    private func contentFrameSize(for contentSize: CGSize, in window: NSWindow) -> NSSize {
+        let content = NSSize(width: contentSize.width, height: contentSize.height)
+        return window.frameRect(forContentRect: NSRect(origin: .zero, size: content)).size
+    }
+}
+
 private struct WindowChromeConfigurator: NSViewRepresentable {
     let mode: AppWindowMode
 
@@ -31,16 +57,20 @@ private struct WindowChromeConfigurator: NSViewRepresentable {
                 return
             }
 
-            guard context.coordinator.lastMode != mode else {
-                return
+            let coordinator = context.coordinator
+            let modeChanged = coordinator.lastMode != mode
+            coordinator.resizeDelegate.mode = mode
+
+            if window.delegate !== coordinator.resizeDelegate {
+                window.delegate = coordinator.resizeDelegate
             }
 
-            context.coordinator.lastMode = mode
-            apply(mode: mode, to: window)
+            apply(mode: mode, to: window, animateTransition: modeChanged)
+            coordinator.lastMode = mode
         }
     }
 
-    private func apply(mode: AppWindowMode, to window: NSWindow) {
+    private func apply(mode: AppWindowMode, to window: NSWindow, animateTransition: Bool) {
         switch mode {
         case .frameworkPicker:
             var styleMask = window.styleMask
@@ -51,7 +81,11 @@ private struct WindowChromeConfigurator: NSViewRepresentable {
             let fixedSize = NSSize(width: size.width, height: size.height)
             window.minSize = fixedSize
             window.maxSize = fixedSize
-            animateWindow(window, toContentSize: fixedSize)
+            window.contentMinSize = fixedSize
+
+            if animateTransition {
+                animateWindow(window, toContentSize: fixedSize)
+            }
 
         case .builder:
             var styleMask = window.styleMask
@@ -61,12 +95,14 @@ private struct WindowChromeConfigurator: NSViewRepresentable {
             let minSize = AppWindowMetrics.builderMinimumSize
             let minimum = NSSize(width: minSize.width, height: minSize.height)
             window.minSize = minimum
+            window.contentMinSize = minimum
             window.maxSize = NSSize(
                 width: CGFloat.greatestFiniteMagnitude,
                 height: CGFloat.greatestFiniteMagnitude
             )
 
-            if window.frame.size.width < minimum.width || window.frame.size.height < minimum.height {
+            let contentSize = window.contentLayoutRect.size
+            if contentSize.width < minimum.width || contentSize.height < minimum.height {
                 animateWindow(window, toContentSize: minimum)
             }
         }
@@ -82,5 +118,6 @@ private struct WindowChromeConfigurator: NSViewRepresentable {
 
     final class Coordinator {
         var lastMode: AppWindowMode?
+        let resizeDelegate = WindowSizeDelegate()
     }
 }

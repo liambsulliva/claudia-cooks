@@ -18,5 +18,6 @@ struct ClaudiasCookingApp: App {
             width: AppWindowMetrics.pickerSize.width,
             height: AppWindowMetrics.pickerSize.height
         )
+        .windowResizability(.contentMinSize)
     }
 }

@@ -124,17 +124,18 @@ struct FrameworkDetailView: View {
         HoverSplitView(
             leadingWidth: $builderPanelWidth,
             trailingWidth: $previewPanelWidth,
-            panelSpacing: FrameworkBuildScreenLayout.builderPaperSpacing
+            panelSpacing: FrameworkBuildScreenLayout.builderPaperSpacing,
+            minLeadingWidth: FrameworkBuildScreenLayout.minBuilderPanelWidth,
+            maxLeadingWidth: FrameworkBuildScreenLayout.maxBuilderPanelWidth
         ) {
             FrameworkBuilderPanel(framework: framework, viewModel: viewModel)
         } trailing: {
             previewPanel(maxPaperHeight: maxPaperHeight)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                .padding(.trailing, FrameworkBuildScreenLayout.paperStackTrailingMargin)
                 .padding(.bottom, -FrameworkBuildScreenLayout.paperOverlapIntoBar)
                 .zIndex(1)
         }
-        .animation(.spring(response: 0.42, dampingFraction: 0.86), value: builderPanelWidth)
-        .animation(.spring(response: 0.42, dampingFraction: 0.86), value: previewPanelWidth)
     }
 
     private func previewPanel(maxPaperHeight: CGFloat) -> some View {
@@ -225,7 +226,10 @@ struct FrameworkDetailView: View {
 
     NavigationStack {
         FrameworkDetailView(framework: .bowl)
-            .frame(width: 1100, height: 760)
+            .frame(
+                width: AppWindowMetrics.builderMinimumSize.width,
+                height: AppWindowMetrics.builderMinimumSize.height
+            )
     }
     .environment(libraryStore)
 }

@@ -15,6 +15,7 @@ struct HoverSplitView<Leading: View, Trailing: View>: View {
 
     private let panelSpacing: CGFloat
     private let minLeadingWidth: CGFloat
+    private let maxLeadingWidth: CGFloat
     private let minTrailingWidth: CGFloat
     private let dividerHitWidth: CGFloat = 6
     private let dividerLineWidth: CGFloat = 3
@@ -25,8 +26,9 @@ struct HoverSplitView<Leading: View, Trailing: View>: View {
     init(
         leadingWidth: Binding<CGFloat>,
         trailingWidth: Binding<CGFloat>,
-        panelSpacing: CGFloat = 64,
+        panelSpacing: CGFloat = 32,
         minLeadingWidth: CGFloat = 360,
+        maxLeadingWidth: CGFloat = .infinity,
         minTrailingWidth: CGFloat = 280,
         @ViewBuilder leading: @escaping () -> Leading,
         @ViewBuilder trailing: @escaping () -> Trailing
@@ -35,6 +37,7 @@ struct HoverSplitView<Leading: View, Trailing: View>: View {
         _trailingWidth = trailingWidth
         self.panelSpacing = panelSpacing
         self.minLeadingWidth = minLeadingWidth
+        self.maxLeadingWidth = maxLeadingWidth
         self.minTrailingWidth = minTrailingWidth
         self.leading = leading
         self.trailing = trailing
@@ -64,8 +67,54 @@ struct HoverSplitView<Leading: View, Trailing: View>: View {
                 trailingWidth = resolvedTrailingWidth
             }
             .onChange(of: resolvedTrailingWidth) { _, newWidth in
-                trailingWidth = newWidth
+                applyTrailingWidth(newWidth)
             }
+            .onChange(of: geometry.size.width) { _, totalWidth in
+                syncWidthsForContainer(totalWidth: totalWidth)
+            }
+        }
+    }
+
+    private func applyTrailingWidth(_ width: CGFloat) {
+        if isDragging {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                trailingWidth = width
+            }
+        } else {
+            trailingWidth = width
+        }
+    }
+
+    private func syncWidthsForContainer(totalWidth: CGFloat) {
+        let clamped = clampedLeadingWidth(leadingWidth, totalWidth: totalWidth)
+        let trailing = max(
+            totalWidth - clamped - dividerHitWidth - panelSpacing,
+            0
+        )
+        guard clamped != leadingWidth || trailing != trailingWidth else { return }
+
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            leadingWidth = clamped
+            trailingWidth = trailing
+        }
+    }
+
+    private func applyLeadingWidth(_ width: CGFloat, totalWidth: CGFloat) {
+        let clamped = clampedLeadingWidth(width, totalWidth: totalWidth)
+        let trailing = max(
+            totalWidth - clamped - dividerHitWidth - panelSpacing,
+            0
+        )
+
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            leadingWidth = clamped
+            trailingWidth = trailing
         }
     }
 
@@ -89,7 +138,7 @@ struct HoverSplitView<Leading: View, Trailing: View>: View {
             updateResizeCursor(hovering: hovering || isDragging)
         }
         .gesture(
-            DragGesture(minimumDistance: 1)
+            DragGesture(minimumDistance: 0, coordinateSpace: .global)
                 .onChanged { value in
                     if dragStartWidth == nil {
                         dragStartWidth = leadingWidth
@@ -98,8 +147,9 @@ struct HoverSplitView<Leading: View, Trailing: View>: View {
                     }
 
                     let startWidth = dragStartWidth ?? leadingWidth
-                    leadingWidth = clampedLeadingWidth(
-                        startWidth + value.translation.width,
+                    let dragDistance = value.location.x - value.startLocation.x
+                    applyLeadingWidth(
+                        startWidth + dragDistance,
                         totalWidth: totalWidth
                     )
                 }
@@ -112,8 +162,16 @@ struct HoverSplitView<Leading: View, Trailing: View>: View {
     }
 
     private func clampedLeadingWidth(_ width: CGFloat, totalWidth: CGFloat) -> CGFloat {
-        let maxLeadingWidth = totalWidth - minTrailingWidth - dividerHitWidth - panelSpacing
-        return min(max(width, minLeadingWidth), max(maxLeadingWidth, minLeadingWidth))
+        let reservedForTrailing = dividerHitWidth + panelSpacing + minTrailingWidth
+        let availableForLeading = totalWidth - reservedForTrailing
+        let cappedMax = min(max(availableForLeading, 0), maxLeadingWidth)
+
+        guard totalWidth >= minLeadingWidth + reservedForTrailing else {
+            let tightLeading = totalWidth - dividerHitWidth - panelSpacing - minTrailingWidth
+            return min(max(width, 0), max(tightLeading, 0))
+        }
+
+        return min(max(width, minLeadingWidth), max(cappedMax, minLeadingWidth))
     }
 
     private func updateResizeCursor(hovering: Bool) {
