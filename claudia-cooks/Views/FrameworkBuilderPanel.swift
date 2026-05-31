@@ -94,9 +94,6 @@ struct FrameworkBuilderPanel: View {
             )
             .textFieldStyle(.plain)
             .lineLimit(3...8)
-            .onChange(of: draftPrompt) { _, newValue in
-                viewModel.updateRecipePromptDraft(newValue)
-            }
             .onSubmit(submitRecipePrompt)
             .onKeyPress(.return, phases: .down) { _ in
                 submitRecipePrompt()

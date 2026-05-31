@@ -17,6 +17,7 @@ final class RecipeBuilderViewModel {
 
     @ObservationIgnored var onRecipeGenerated: ((GeneratedRecipe, String) -> Void)?
     @ObservationIgnored var onRecipeMarkdownChanged: ((String) -> Void)?
+    @ObservationIgnored var onRecipeDocumentCleared: (() -> Void)?
     @ObservationIgnored var onSelectionsChanged: ((RecipeSelections) -> Void)?
     var mlxSetup: MLXSetupViewModel
     @ObservationIgnored private let generationService: RecipeGenerationService
@@ -104,11 +105,6 @@ final class RecipeBuilderViewModel {
         }
     }
 
-    func updateRecipePromptDraft(_ text: String) {
-        selections.customPrompt = text
-        persistSelectionsAndRefreshPreview()
-    }
-
     func submitRecipePrompt(_ prompt: String) {
         selections.customPrompt = prompt
         clearIngredientSelections()
@@ -125,7 +121,9 @@ final class RecipeBuilderViewModel {
         onSelectionsChanged?(selections)
 
         if selections.ingredientMakeup.isEmpty {
-            resetPreviewToBlank()
+            if selections.normalizedCustomPrompt.isEmpty {
+                resetPreviewAndClearDocument()
+            }
             return
         }
 
@@ -135,10 +133,11 @@ final class RecipeBuilderViewModel {
         }
     }
 
-    private func resetPreviewToBlank() {
+    private func resetPreviewAndClearDocument() {
         cancelActiveGeneration()
         lastGeneratedMakeup = nil
         setRecipeMarkdown("")
+        onRecipeDocumentCleared?()
     }
 
     private func cancelActiveGeneration() {
@@ -224,7 +223,7 @@ final class RecipeBuilderViewModel {
 
         errorMessage = nil
 
-        guard selections.canGenerate else {
+        guard selections.hasGenerationInput else {
             isGenerating = false
             return
         }

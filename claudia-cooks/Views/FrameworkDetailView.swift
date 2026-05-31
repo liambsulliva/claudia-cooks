@@ -381,6 +381,14 @@ struct FrameworkDetailView: View {
             libraryStore.updateSelections(selections, for: editingRecipeID)
         }
 
+        viewModel.onRecipeDocumentCleared = {
+            let recipeID = session.selectedRecipe?.id ?? session.sessionID
+            libraryStore.clearRecipeDocument(for: recipeID)
+            if recipeID == session.sessionID {
+                session.liveRecipeMarkdown = ""
+            }
+        }
+
         viewModel.onRecipeGenerated = { recipe, recipeMarkdown in
             session.upsertGeneratedRecipe(
                 recipe,

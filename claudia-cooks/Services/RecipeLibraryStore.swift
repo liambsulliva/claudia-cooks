@@ -101,6 +101,32 @@ final class RecipeLibraryStore {
         }
     }
 
+    func clearRecipeDocument(for recipeID: UUID) {
+        guard let index = recipes.firstIndex(where: { $0.id == recipeID }) else {
+            return
+        }
+
+        do {
+            try ensureLibraryDirectory()
+
+            let recipe = recipes[index]
+            if let fileURL = fileURL(for: recipe),
+               fileManager.fileExists(atPath: fileURL.path) {
+                try fileManager.removeItem(at: fileURL)
+            }
+
+            markdownCache.removeValue(forKey: recipeID)
+            recipes[index].title = "Blank Page"
+            recipes[index].fileName = ""
+            recipes[index].isBlank = true
+            recipes[index].updatedAt = Date()
+            try persistManifest()
+            errorMessage = nil
+        } catch {
+            errorMessage = "Recipe library could not clear this file."
+        }
+    }
+
     func updateSelections(_ selections: RecipeSelections, for recipeID: UUID) {
         guard let index = recipes.firstIndex(where: { $0.id == recipeID }) else {
             return

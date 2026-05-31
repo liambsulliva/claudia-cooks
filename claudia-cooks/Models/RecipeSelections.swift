@@ -14,8 +14,13 @@ struct RecipeSelections: Equatable {
         customPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// True when MLX has chip selections or a submitted recipe prompt to work from.
+    var hasGenerationInput: Bool {
+        !ingredientMakeup.isEmpty || !normalizedCustomPrompt.isEmpty
+    }
+
     var canGenerate: Bool {
-        !isEmpty || !normalizedCustomPrompt.isEmpty
+        hasGenerationInput
     }
 
     var isEmpty: Bool {
