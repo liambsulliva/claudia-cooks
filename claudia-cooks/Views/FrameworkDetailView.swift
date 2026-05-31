@@ -109,7 +109,7 @@ struct FrameworkDetailView: View {
             .animation(.easeInOut(duration: 0.22), value: useCenterStage)
             .animation(.easeInOut(duration: 0.2), value: screenMode)
         }
-        .navigationTitle(framework.title)
+        .navigationTitle(activeFramework.title)
         .sheet(isPresented: $viewModel.mlxSetup.showModelSetupSheet) {
             MLXModelSetupSheet(
                 selectedTier: $viewModel.mlxSetup.modelSetupTier,
@@ -188,7 +188,7 @@ struct FrameworkDetailView: View {
             strategicLayoutDependency: sheetCount
         ) {
             FrameworkBuilderPanel(
-                framework: framework,
+                framework: activeFramework,
                 viewModel: viewModel,
                 openVariantMenu: $openVariantMenu
             )
@@ -282,6 +282,10 @@ struct FrameworkDetailView: View {
 
     private var editingRecipeID: UUID {
         session.selectedRecipe?.id ?? session.sessionID
+    }
+
+    private var activeFramework: RecipeFramework {
+        libraryStore.recipe(for: editingRecipeID)?.framework ?? framework
     }
 
     private func reconcileWithLibraryOnDisk() {
