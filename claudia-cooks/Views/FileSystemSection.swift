@@ -184,7 +184,7 @@ struct FileSystemSection: View {
                     .lineLimit(2)
                     .foregroundStyle(.primary)
 
-                Text(relativeDate(for: recipe.updatedAt))
+                Text(relativeDate(for: recipe.createdAt))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

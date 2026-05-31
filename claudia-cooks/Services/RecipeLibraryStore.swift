@@ -133,7 +133,6 @@ final class RecipeLibraryStore {
         }
 
         recipes[index].selections = selections.stored
-        recipes[index].updatedAt = Date()
 
         do {
             try persistManifest()
@@ -180,7 +179,7 @@ final class RecipeLibraryStore {
                 )
             }
 
-            recipes.sort { $0.updatedAt > $1.updatedAt }
+            recipes.sort { $0.createdAt > $1.createdAt }
             markdownCache[sessionID] = recipeMarkdown
             try persistManifest()
             errorMessage = nil
@@ -273,7 +272,7 @@ final class RecipeLibraryStore {
         do {
             let data = try Data(contentsOf: manifestURL)
             let decodedRecipes = try JSONDecoder().decode([SavedRecipe].self, from: data)
-                .sorted { $0.updatedAt > $1.updatedAt }
+                .sorted { $0.createdAt > $1.createdAt }
 
             if decodedRecipes != recipes {
                 recipes = decodedRecipes
