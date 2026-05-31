@@ -61,8 +61,13 @@ struct IngredientGraphData: Equatable {
         let count = CGFloat(nodes.count)
         let densityBoost = sqrt(count / 3)
         let canvasSide = max(min(size.width, size.height) - 110, 1)
-        let canvasBoost = canvasSide / 380
-        return min(max(densityBoost, canvasBoost, 1), 3.2)
+        let canvasBoost = canvasSide / 320
+        let requestedMultiplier = min(max(densityBoost, canvasBoost, 1), 3.4)
+        return IngredientGraphPhysics.stableSpacingMultiplier(
+            requestedMultiplier: requestedMultiplier,
+            nodeCount: nodes.count,
+            canvasSize: size
+        )
     }
 
     func positions(in size: CGSize) -> [String: CGPoint] {

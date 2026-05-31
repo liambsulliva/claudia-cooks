@@ -11,16 +11,19 @@ enum IngredientGraphPhysics {
         let point: CGPoint
     }
 
-    private static let collisionPadding: CGFloat = 6
-    private static let edgeRestLength: CGFloat = 118
-    private static let edgeStretchLimit: CGFloat = 96
+    private static let collisionPadding: CGFloat = 12
+    private static let edgeRestLength: CGFloat = 152
+    private static let edgeStretchLimit: CGFloat = 115
     private static let edgeSpring: CGFloat = 18
     private static let edgeSnapSpring: CGFloat = 76
     private static let edgeDamping: CGFloat = 5.2
     private static let collisionSpring: CGFloat = 420
     private static let airDrag: CGFloat = 4.8
     private static let velocityLimit: CGFloat = 1_400
-    private static let wallRestitution: CGFloat = 0.48
+    private static let wallRestitution: CGFloat = 0.08
+    private static let collisionCorrectionVelocityDamping: CGFloat = 0.35
+    private static let collisionPositionCorrectionStrength: CGFloat = 0.55
+    private static let maxCollisionCorrectionPerIteration: CGFloat = 16
     /// Per-frame velocity retention at 60 fps (~0.97 ≈ noticeable drag, settles within ~1–2 s).
     private static let frameDamping: CGFloat = 0.972
 
@@ -38,6 +41,13 @@ enum IngredientGraphPhysics {
         var nextVelocities = velocities
         let pinnedNodeID = dragTarget?.nodeID
         var simulationPositions = positions
+        let nodeCount = positions.count
+        let simulationSpacingMultiplier = stableSpacingMultiplier(
+            requestedMultiplier: spacingMultiplier,
+            nodeCount: nodeCount,
+            canvasSize: canvasSize
+        )
+        let mobilities = nodeMobilities(positions: positions, radii: radii, edges: edges)
 
         if let dragTarget {
             let radius = radii[dragTarget.nodeID, default: 16]
@@ -55,13 +65,16 @@ enum IngredientGraphPhysics {
             edges: edges,
             positions: simulationPositions,
             velocities: velocities,
-            spacingMultiplier: spacingMultiplier,
+            spacingMultiplier: simulationSpacingMultiplier,
             forces: &forces
         )
+        let collisionForceScale = nodeCount > 24 ? CGFloat(24) / CGFloat(nodeCount) : 1
+
         applyCollisionForces(
             positions: simulationPositions,
             radii: radii,
-            spacingMultiplier: spacingMultiplier,
+            spacingMultiplier: simulationSpacingMultiplier,
+            forceScale: collisionForceScale,
             forces: &forces
         )
         applyAirDrag(velocities: velocities, pinnedNodeID: pinnedNodeID, forces: &forces)
@@ -77,14 +90,19 @@ enum IngredientGraphPhysics {
 
             var velocity = nextVelocities[nodeID, default: .zero]
             let force = forces[nodeID, default: .zero]
+            let mobility = mobilities[nodeID, default: 1]
 
-            velocity.dx += force.dx * deltaTime
-            velocity.dy += force.dy * deltaTime
+            velocity.dx += force.dx * mobility * deltaTime
+            velocity.dy += force.dy * mobility * deltaTime
             velocity = velocity.limited(to: velocityLimit)
 
             let damping = pow(frameDamping, deltaTime * 60)
             velocity.dx *= damping
             velocity.dy *= damping
+
+            if velocity.length < 2 {
+                velocity = .zero
+            }
 
             var updatedPosition = CGPoint(
                 x: position.x + velocity.dx * deltaTime,
@@ -104,16 +122,26 @@ enum IngredientGraphPhysics {
             nextVelocities[nodeID] = velocity
         }
 
+        let collisionIterations = min(8, max(2, nodeCount / 6))
+
         let separated = resolveCollisionPenetration(
             positions: nextPositions,
             radii: radii,
             pinnedNodeID: pinnedNodeID,
             canvasSize: canvasSize,
-            spacingMultiplier: spacingMultiplier,
-            iterations: 2
+            spacingMultiplier: simulationSpacingMultiplier,
+            mobilities: mobilities,
+            iterations: collisionIterations
         )
 
         for (nodeID, point) in separated {
+            if let currentPoint = nextPositions[nodeID],
+               currentPoint.distance(to: point) > 0.25 {
+                var velocity = nextVelocities[nodeID, default: .zero]
+                velocity.dx *= Self.collisionCorrectionVelocityDamping
+                velocity.dy *= Self.collisionCorrectionVelocityDamping
+                nextVelocities[nodeID] = velocity
+            }
             nextPositions[nodeID] = point
         }
 
@@ -124,6 +152,44 @@ enum IngredientGraphPhysics {
         }
 
         return (nextPositions, nextVelocities)
+    }
+
+    static func stableSpacingMultiplier(
+        requestedMultiplier: CGFloat,
+        nodeCount: Int,
+        canvasSize: CGSize
+    ) -> CGFloat {
+        guard nodeCount > 1 else {
+            return requestedMultiplier
+        }
+
+        let drawableSide = max(min(canvasSize.width, canvasSize.height) - 110, 1)
+        let spreadSide = sqrt(CGFloat(nodeCount)) * edgeRestLength * 0.62
+        let maxStable = drawableSide / max(spreadSide, 1)
+        // Keep a generous minimum rest length; only cap runaway multipliers on dense graphs.
+        let cap = max(1.35, min(maxStable * 1.2, 2.6))
+        return min(requestedMultiplier, cap)
+    }
+
+    private static func nodeMobilities(
+        positions: [String: CGPoint],
+        radii: [String: CGFloat],
+        edges: [IngredientGraphEdge]
+    ) -> [String: CGFloat] {
+        var edgeDegrees = positions.keys.reduce(into: [String: Int]()) { result, nodeID in
+            result[nodeID] = 0
+        }
+
+        for edge in edges {
+            edgeDegrees[edge.sourceID, default: 0] += 1
+            edgeDegrees[edge.targetID, default: 0] += 1
+        }
+
+        return positions.keys.reduce(into: [String: CGFloat]()) { result, nodeID in
+            let radiusScale = max(radii[nodeID, default: 16] / 16, 1)
+            let degreeScale = 1 + min(CGFloat(edgeDegrees[nodeID, default: 0]), 12) * 0.06
+            result[nodeID] = 1 / (radiusScale * degreeScale)
+        }
     }
 
     private static func applyEdgeSprings(
@@ -177,6 +243,7 @@ enum IngredientGraphPhysics {
         positions: [String: CGPoint],
         radii: [String: CGFloat],
         spacingMultiplier: CGFloat,
+        forceScale: CGFloat = 1,
         forces: inout [String: CGVector]
     ) {
         let nodeIDs = positions.keys.sorted()
@@ -207,7 +274,10 @@ enum IngredientGraphPhysics {
 
                 let normal = CGVector(dx: delta.dx / distance, dy: delta.dy / distance)
                 let overlap = minimumDistance - distance
-                let force = CGVector(dx: normal.dx * overlap * collisionSpring, dy: normal.dy * overlap * collisionSpring)
+                let force = CGVector(
+                    dx: normal.dx * overlap * collisionSpring * forceScale,
+                    dy: normal.dy * overlap * collisionSpring * forceScale
+                )
 
                 forces[leftID, default: .zero] -= force
                 forces[rightID, default: .zero] += force
@@ -270,6 +340,7 @@ enum IngredientGraphPhysics {
         pinnedNodeID: String?,
         canvasSize: CGSize,
         spacingMultiplier: CGFloat,
+        mobilities: [String: CGFloat],
         iterations: Int
     ) -> [String: CGPoint] {
         var resolved = positions
@@ -308,23 +379,24 @@ enum IngredientGraphPhysics {
 
                     let normal = CGVector(dx: delta.dx / distance, dy: delta.dy / distance)
                     let overlap = minimumDistance - distance
+                    let correction = min(
+                        overlap * collisionPositionCorrectionStrength,
+                        maxCollisionCorrectionPerIteration
+                    )
+                    let leftMobility = leftID == pinnedNodeID ? 0 : mobilities[leftID, default: 1]
+                    let rightMobility = rightID == pinnedNodeID ? 0 : mobilities[rightID, default: 1]
+                    let totalMobility = leftMobility + rightMobility
 
-                    switch (leftID == pinnedNodeID, rightID == pinnedNodeID) {
-                    case (true, false):
-                        right.x += normal.dx * overlap
-                        right.y += normal.dy * overlap
-                    case (false, true):
-                        left.x -= normal.dx * overlap
-                        left.y -= normal.dy * overlap
-                    case (true, true):
+                    guard totalMobility > 0 else {
                         continue
-                    case (false, false):
-                        let halfOverlap = overlap / 2
-                        left.x -= normal.dx * halfOverlap
-                        left.y -= normal.dy * halfOverlap
-                        right.x += normal.dx * halfOverlap
-                        right.y += normal.dy * halfOverlap
                     }
+
+                    let leftCorrection = correction * (leftMobility / totalMobility)
+                    let rightCorrection = correction * (rightMobility / totalMobility)
+                    left.x -= normal.dx * leftCorrection
+                    left.y -= normal.dy * leftCorrection
+                    right.x += normal.dx * rightCorrection
+                    right.y += normal.dy * rightCorrection
 
                     if leftID != pinnedNodeID {
                         resolved[leftID] = clamp(left, radius: leftRadius, in: canvasSize)
@@ -341,6 +413,12 @@ enum IngredientGraphPhysics {
 
     static func clamp(_ point: CGPoint, radius: CGFloat, in size: CGSize) -> CGPoint {
         constrain(point, velocity: .zero, radius: radius, in: size).point
+    }
+}
+
+private extension CGPoint {
+    func distance(to point: CGPoint) -> CGFloat {
+        hypot(x - point.x, y - point.y)
     }
 }
 
