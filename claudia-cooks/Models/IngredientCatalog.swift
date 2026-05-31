@@ -139,4 +139,8 @@ enum IngredientCatalog {
     static func options(for category: IngredientCategory) -> [String] {
         optionGroups(for: category).flatMap(\.options)
     }
+
+    static func variants(for option: String) -> [String]? {
+        IngredientVariantCatalog.variants(for: option)
+    }
 }

@@ -17,6 +17,7 @@ struct FrameworkDetailView: View {
     @State private var builderPanelWidth = FrameworkBuildScreenLayout.defaultBuilderPanelWidth
     @State private var previewPanelWidth = FrameworkBuildScreenLayout.defaultPreviewPanelWidth
     @State private var screenMode: FrameworkDetailScreenMode = .editor
+    @State private var openVariantMenu: (category: IngredientCategory, option: String)?
     @State private var didConfigureSession = false
     @State private var markdownSaveTask: Task<Void, Never>?
 
@@ -150,6 +151,21 @@ struct FrameworkDetailView: View {
                 .frame(height: FrameworkBuildScreenLayout.fileSystemBarHeight)
                 .zIndex(10)
         }
+        .ingredientVariantMenuHost(
+            selectionState: { option, category in
+                viewModel.selections.selectionState(for: option, in: category)
+            },
+            onToggleVariant: { base, variant, category in
+                viewModel.toggleVariant(variant, for: base, in: category)
+            },
+            onDismiss: { openVariantMenu = nil }
+        )
+        .onChange(of: session.activeSheetID) { _, _ in
+            openVariantMenu = nil
+        }
+        .onChange(of: screenMode) { _, _ in
+            openVariantMenu = nil
+        }
     }
 
     private func buildScreen(maxPaperHeight: CGFloat, availablePaperHeight: CGFloat) -> some View {
@@ -172,7 +188,11 @@ struct FrameworkDetailView: View {
             },
             strategicLayoutDependency: sheetCount
         ) {
-            FrameworkBuilderPanel(framework: framework, viewModel: viewModel)
+            FrameworkBuilderPanel(
+                framework: framework,
+                viewModel: viewModel,
+                openVariantMenu: $openVariantMenu
+            )
         } trailing: {
             previewPanel(maxPaperHeight: maxPaperHeight)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)

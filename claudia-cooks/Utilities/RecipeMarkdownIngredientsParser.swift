@@ -72,7 +72,7 @@ enum RecipeMarkdownIngredientsParser {
 
     /// Matches a catalog option inside the ingredient name (not the full line with amounts).
     static func catalogCategory(for ingredientName: String) -> IngredientCategory? {
-        let normalizedLine = ingredientName.lowercased()
+        let normalizedLine = IngredientSelectionLabel.baseOption(from: ingredientName).lowercased()
         var bestMatch: (category: IngredientCategory, length: Int)?
 
         for category in IngredientCategory.allCases {

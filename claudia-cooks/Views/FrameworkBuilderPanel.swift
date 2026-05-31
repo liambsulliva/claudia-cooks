@@ -8,6 +8,7 @@ import SwiftUI
 struct FrameworkBuilderPanel: View {
     let framework: RecipeFramework
     @Bindable var viewModel: RecipeBuilderViewModel
+    @Binding var openVariantMenu: (category: IngredientCategory, option: String)?
     @State private var draftPrompt = ""
 
     var body: some View {
@@ -29,8 +30,12 @@ struct FrameworkBuilderPanel: View {
                             set: { viewModel.setOtherText($0, for: category) }
                         )
                     },
+                    openVariantMenu: $openVariantMenu,
                     onToggle: { option, category in
                         viewModel.toggle(option, in: category)
+                    },
+                    onToggleVariant: { base, variant, category in
+                        viewModel.toggleVariant(variant, for: base, in: category)
                     }
                 )
             }
@@ -130,7 +135,7 @@ struct FrameworkBuilderPanel: View {
                     .font(.headline)
                     .foregroundStyle(.secondary)
 
-                Text("Choose ingredients on the left. Recipes stack on the right and rise from the file system below.")
+                Text("Choose ingredients on the left. Long-press an ingredient to open its type menu, then release over a type or click one to narrow it. Recipes stack on the right and rise from the file system below.")
                     .font(.body)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

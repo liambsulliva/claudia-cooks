@@ -70,6 +70,12 @@ final class RecipeBuilderViewModel {
         scheduleGenerationIfMakeupChanged()
     }
 
+    func toggleVariant(_ variant: String, for base: String, in category: IngredientCategory) {
+        selections.toggle(base: base, variant: variant, in: category)
+        persistSelectionsAndRefreshPreview()
+        scheduleGenerationIfMakeupChanged()
+    }
+
     func setOtherText(_ text: String, for category: IngredientCategory) {
         selections.setOtherText(text, for: category)
         persistSelectionsAndRefreshPreview()

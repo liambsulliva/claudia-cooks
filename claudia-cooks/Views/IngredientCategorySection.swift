@@ -7,9 +7,11 @@ import SwiftUI
 
 struct IngredientCategorySection: View {
     let category: IngredientCategory
-    let selectedOptions: Set<String>
+    @Binding var openVariantMenu: (category: IngredientCategory, option: String)?
+    let selectionState: (String) -> IngredientOptionSelectionState
     @Binding var otherText: String
     let onToggle: (String) -> Void
+    let onToggleVariant: (String, String) -> Void
 
     private let columns = [
         GridItem(.adaptive(minimum: 96), spacing: 8)
@@ -37,7 +39,29 @@ struct IngredientCategorySection: View {
 
                             LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
                                 ForEach(group.options, id: \.self) { option in
-                                    ingredientChip(for: option)
+                                    IngredientOptionChip(
+                                        option: option,
+                                        category: category,
+                                        selectionState: selectionState(option),
+                                        isMenuPresented: Binding(
+                                            get: {
+                                                openVariantMenu?.category == category
+                                                    && openVariantMenu?.option == option
+                                            },
+                                            set: { isPresented in
+                                                if isPresented {
+                                                    openVariantMenu = (category, option)
+                                                } else if openVariantMenu?.category == category,
+                                                          openVariantMenu?.option == option {
+                                                    openVariantMenu = nil
+                                                }
+                                            }
+                                        ),
+                                        onToggle: { onToggle(option) },
+                                        onToggleVariant: { variant in
+                                            onToggleVariant(option, variant)
+                                        }
+                                    )
                                 }
                             }
                         }
@@ -71,45 +95,23 @@ struct IngredientCategorySection: View {
                 .strokeBorder(category.accentColor.opacity(0.32), lineWidth: 1)
         }
     }
-
-    @ViewBuilder
-    private func ingredientChip(for option: String) -> some View {
-        let isSelected = selectedOptions.contains(option)
-
-        if isSelected {
-            Button {
-                onToggle(option)
-            } label: {
-                Text(option)
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.glassProminent)
-            .tint(category.accentColor)
-            .buttonBorderShape(.roundedRectangle(radius: 10))
-        } else {
-            Button {
-                onToggle(option)
-            } label: {
-                Text(option)
-                    .font(.caption)
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.glass)
-            .buttonBorderShape(.roundedRectangle(radius: 10))
-        }
-    }
 }
 
 #Preview {
     @Previewable @State var otherText = ""
+    @Previewable @State var selections = RecipeSelections()
+
+    @Previewable @State var openVariantMenu: (category: IngredientCategory, option: String)?
 
     IngredientCategorySection(
         category: .protein,
-        selectedOptions: ["Chicken", "Tofu"],
+        openVariantMenu: $openVariantMenu,
+        selectionState: { selections.selectionState(for: $0, in: .protein) },
         otherText: $otherText,
-        onToggle: { _ in }
+        onToggle: { selections.toggle($0, in: .protein) },
+        onToggleVariant: { base, variant in
+            selections.toggle(base: base, variant: variant, in: .protein)
+        }
     )
     .padding()
     .frame(width: 260)
