@@ -227,8 +227,7 @@ final class RecipeBuilderViewModel {
                     self?.renderStreamingPreview(
                         partialResponse: partialResponse,
                         requestID: requestID,
-                        framework: framework,
-                        selections: selections
+                        framework: framework
                     )
                 }
             }
@@ -239,8 +238,7 @@ final class RecipeBuilderViewModel {
 
             let renderedMarkdown = RecipeMarkdownRenderer.render(
                 recipe: recipe,
-                framework: framework,
-                selections: selections
+                framework: framework
             )
             setRecipeMarkdown(renderedMarkdown)
             lastGeneratedMakeup = selections.ingredientMakeup
@@ -285,8 +283,7 @@ final class RecipeBuilderViewModel {
     private func renderStreamingPreview(
         partialResponse: String,
         requestID: Int,
-        framework: RecipeFramework,
-        selections: RecipeSelections
+        framework: RecipeFramework
     ) {
         guard requestID == generationRequestID else {
             return
@@ -306,8 +303,7 @@ final class RecipeBuilderViewModel {
         setRecipeMarkdown(
             RecipeMarkdownRenderer.render(
                 recipe: partialRecipe,
-                framework: framework,
-                selections: selections
+                framework: framework
             )
         )
     }

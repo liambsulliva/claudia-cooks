@@ -31,6 +31,7 @@ enum IngredientGraphPhysics {
         edges: [IngredientGraphEdge],
         dragTarget: DragTarget?,
         canvasSize: CGSize,
+        spacingMultiplier: CGFloat = 1,
         deltaTime: CGFloat
     ) -> (positions: [String: CGPoint], velocities: [String: CGVector]) {
         var nextPositions = positions
@@ -50,8 +51,19 @@ enum IngredientGraphPhysics {
             result[nodeID] = .zero
         }
 
-        applyEdgeSprings(edges: edges, positions: simulationPositions, velocities: velocities, forces: &forces)
-        applyCollisionForces(positions: simulationPositions, radii: radii, forces: &forces)
+        applyEdgeSprings(
+            edges: edges,
+            positions: simulationPositions,
+            velocities: velocities,
+            spacingMultiplier: spacingMultiplier,
+            forces: &forces
+        )
+        applyCollisionForces(
+            positions: simulationPositions,
+            radii: radii,
+            spacingMultiplier: spacingMultiplier,
+            forces: &forces
+        )
         applyAirDrag(velocities: velocities, pinnedNodeID: pinnedNodeID, forces: &forces)
 
         for nodeID in positions.keys {
@@ -97,6 +109,7 @@ enum IngredientGraphPhysics {
             radii: radii,
             pinnedNodeID: pinnedNodeID,
             canvasSize: canvasSize,
+            spacingMultiplier: spacingMultiplier,
             iterations: 2
         )
 
@@ -117,8 +130,12 @@ enum IngredientGraphPhysics {
         edges: [IngredientGraphEdge],
         positions: [String: CGPoint],
         velocities: [String: CGVector],
+        spacingMultiplier: CGFloat,
         forces: inout [String: CGVector]
     ) {
+        let scaledRestLength = edgeRestLength * spacingMultiplier
+        let scaledStretchLimit = edgeStretchLimit * spacingMultiplier
+
         for edge in edges {
             guard
                 let source = positions[edge.sourceID],
@@ -130,9 +147,9 @@ enum IngredientGraphPhysics {
             let delta = CGVector(dx: target.x - source.x, dy: target.y - source.y)
             let distance = max(delta.length, 0.001)
             let normal = CGVector(dx: delta.dx / distance, dy: delta.dy / distance)
-            let restLength = edgeRestLength + CGFloat(edge.recipeCount - 1) * 10
+            let restLength = scaledRestLength + CGFloat(edge.recipeCount - 1) * 10 * spacingMultiplier
             let stretch = distance - restLength
-            let overLimit = max(abs(stretch) - edgeStretchLimit, 0)
+            let overLimit = max(abs(stretch) - scaledStretchLimit, 0)
             let snapDirection: CGFloat = stretch >= 0 ? 1 : -1
 
             let sourceVelocity = velocities[edge.sourceID, default: .zero]
@@ -159,9 +176,11 @@ enum IngredientGraphPhysics {
     private static func applyCollisionForces(
         positions: [String: CGPoint],
         radii: [String: CGFloat],
+        spacingMultiplier: CGFloat,
         forces: inout [String: CGVector]
     ) {
         let nodeIDs = positions.keys.sorted()
+        let padding = collisionPadding * spacingMultiplier
 
         for index in nodeIDs.indices {
             let leftID = nodeIDs[index]
@@ -172,7 +191,7 @@ enum IngredientGraphPhysics {
                     continue
                 }
 
-                let minimumDistance = radii[leftID, default: 16] + radii[rightID, default: 16] + collisionPadding
+                let minimumDistance = radii[leftID, default: 16] + radii[rightID, default: 16] + padding
                 var delta = CGVector(dx: right.x - left.x, dy: right.y - left.y)
                 var distance = delta.length
 
@@ -250,10 +269,12 @@ enum IngredientGraphPhysics {
         radii: [String: CGFloat],
         pinnedNodeID: String?,
         canvasSize: CGSize,
+        spacingMultiplier: CGFloat,
         iterations: Int
     ) -> [String: CGPoint] {
         var resolved = positions
         let nodeIDs = resolved.keys.sorted()
+        let padding = collisionPadding * spacingMultiplier
 
         guard nodeIDs.count > 1 else {
             return resolved
@@ -271,7 +292,7 @@ enum IngredientGraphPhysics {
 
                     let leftRadius = radii[leftID, default: 16]
                     let rightRadius = radii[rightID, default: 16]
-                    let minimumDistance = leftRadius + rightRadius + collisionPadding
+                    let minimumDistance = leftRadius + rightRadius + padding
                     var delta = CGVector(dx: right.x - left.x, dy: right.y - left.y)
                     var distance = delta.length
 

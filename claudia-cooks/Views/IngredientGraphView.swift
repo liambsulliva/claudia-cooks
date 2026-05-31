@@ -4,6 +4,7 @@
 //
 
 import SwiftUI
+import AppKit
 
 struct IngredientGraphView: View {
     let recipes: [SavedRecipe]
@@ -161,11 +162,17 @@ private struct InteractiveIngredientGraphCanvas: View {
     let graph: IngredientGraphData
     let highlightedCategory: IngredientCategory?
 
+    private static let minViewportScale: CGFloat = 0.45
+    private static let maxViewportScale: CGFloat = 3.2
+
     @State private var positions: [String: CGPoint] = [:]
     @State private var velocities: [String: CGVector] = [:]
     @State private var draggingNodeID: String?
     @State private var dragTarget: CGPoint?
     @State private var lastFrameDate: Date?
+    @State private var viewportScale: CGFloat = 1
+    @State private var viewportOffset = CGSize.zero
+    @State private var panStartOffset: CGSize?
 
     var body: some View {
         GeometryReader { geometry in
@@ -173,29 +180,22 @@ private struct InteractiveIngredientGraphCanvas: View {
 
             TimelineView(.animation(minimumInterval: 1 / 60)) { timeline in
                 ZStack {
-                    Canvas { context, _ in
-                        drawEdges(in: &context)
-                    }
-                    .allowsHitTesting(false)
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .gesture(backdropPanGesture())
 
-                    ForEach(graph.nodes) { node in
-                        let radius = graph.radius(for: node)
-                        let center = positions[node.id] ?? CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
-                        let isEmphasized = isNodeEmphasized(node)
-
-                        IngredientGraphNodeBubble(
-                            node: node,
-                            radius: radius,
-                            isDragging: draggingNodeID == node.id,
-                            isDimmed: !isEmphasized
-                        )
-                        .position(center)
-                        .gesture(nodeDragGesture(node: node, canvasSize: canvasSize))
-                        .zIndex(nodeZIndex(for: node, isEmphasized: isEmphasized))
+                    graphContent(canvasSize: canvasSize)
+                        .scaleEffect(viewportScale, anchor: .topLeading)
+                        .offset(viewportOffset)
+                }
+                .coordinateSpace(name: "ingredientGraphViewport")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
+                .overlay {
+                    IngredientGraphViewportEventCatcher { factor, anchor in
+                        zoomViewport(by: factor, at: anchor)
                     }
                 }
-                .coordinateSpace(name: "ingredientGraphCanvas")
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .onAppear {
                     seedPhysics(in: canvasSize, preservingExisting: false)
                     lastFrameDate = timeline.date
@@ -215,6 +215,32 @@ private struct InteractiveIngredientGraphCanvas: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func graphContent(canvasSize: CGSize) -> some View {
+        ZStack {
+            Canvas { context, _ in
+                drawEdges(in: &context)
+            }
+            .allowsHitTesting(false)
+
+            ForEach(graph.nodes) { node in
+                let radius = graph.radius(for: node)
+                let center = positions[node.id] ?? CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
+                let isEmphasized = isNodeEmphasized(node)
+
+                IngredientGraphNodeBubble(
+                    node: node,
+                    radius: radius,
+                    isDragging: draggingNodeID == node.id,
+                    isDimmed: !isEmphasized
+                )
+                .position(center)
+                .gesture(nodeDragGesture(node: node, canvasSize: canvasSize))
+                .zIndex(nodeZIndex(for: node, isEmphasized: isEmphasized))
+            }
+        }
+        .frame(width: canvasSize.width, height: canvasSize.height)
     }
 
     private func isNodeEmphasized(_ node: IngredientGraphNode) -> Bool {
@@ -266,14 +292,15 @@ private struct InteractiveIngredientGraphCanvas: View {
     }
 
     private func nodeDragGesture(node: IngredientGraphNode, canvasSize: CGSize) -> some Gesture {
-        DragGesture(minimumDistance: 0, coordinateSpace: .named("ingredientGraphCanvas"))
+        DragGesture(minimumDistance: 0, coordinateSpace: .named("ingredientGraphViewport"))
             .onChanged { value in
                 var transaction = Transaction()
                 transaction.disablesAnimations = true
 
                 withTransaction(transaction) {
+                    let graphLocation = graphPoint(for: value.location)
                     let pinned = IngredientGraphPhysics.clamp(
-                        value.location,
+                        graphLocation,
                         radius: graph.radius(for: node),
                         in: canvasSize
                     )
@@ -287,6 +314,54 @@ private struct InteractiveIngredientGraphCanvas: View {
                 draggingNodeID = nil
                 dragTarget = nil
             }
+    }
+
+    private func backdropPanGesture() -> some Gesture {
+        DragGesture(minimumDistance: 1, coordinateSpace: .named("ingredientGraphViewport"))
+            .onChanged { value in
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+
+                withTransaction(transaction) {
+                    let startOffset = panStartOffset ?? viewportOffset
+                    panStartOffset = startOffset
+                    viewportOffset = CGSize(
+                        width: startOffset.width + value.translation.width,
+                        height: startOffset.height + value.translation.height
+                    )
+                }
+            }
+            .onEnded { _ in
+                panStartOffset = nil
+            }
+    }
+
+    private func graphPoint(for viewportPoint: CGPoint) -> CGPoint {
+        CGPoint(
+            x: (viewportPoint.x - viewportOffset.width) / viewportScale,
+            y: (viewportPoint.y - viewportOffset.height) / viewportScale
+        )
+    }
+
+    private func zoomViewport(by factor: CGFloat, at anchor: CGPoint) {
+        let clampedFactor = min(max(factor, 0.2), 5)
+        let nextScale = min(max(viewportScale * clampedFactor, Self.minViewportScale), Self.maxViewportScale)
+
+        guard nextScale != viewportScale else {
+            return
+        }
+
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+
+        withTransaction(transaction) {
+            let graphAnchor = graphPoint(for: anchor)
+            viewportOffset = CGSize(
+                width: anchor.x - graphAnchor.x * nextScale,
+                height: anchor.y - graphAnchor.y * nextScale
+            )
+            viewportScale = nextScale
+        }
     }
 
     private func seedPhysics(in canvasSize: CGSize, preservingExisting: Bool) {
@@ -354,10 +429,119 @@ private struct InteractiveIngredientGraphCanvas: View {
                 edges: graph.edges,
                 dragTarget: drag,
                 canvasSize: canvasSize,
+                spacingMultiplier: graph.spacingMultiplier(in: canvasSize),
                 deltaTime: CGFloat(deltaTime)
             )
             positions = result.positions
             velocities = result.velocities
+        }
+    }
+}
+
+private struct IngredientGraphViewportEventCatcher: NSViewRepresentable {
+    let onZoom: (CGFloat, CGPoint) -> Void
+
+    func makeNSView(context: Context) -> EventCaptureView {
+        let view = EventCaptureView()
+        view.coordinator = context.coordinator
+        context.coordinator.attach(to: view)
+        return view
+    }
+
+    func updateNSView(_ nsView: EventCaptureView, context: Context) {
+        context.coordinator.onZoom = onZoom
+        context.coordinator.attach(to: nsView)
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onZoom: onZoom)
+    }
+
+    static func dismantleNSView(_ nsView: EventCaptureView, coordinator: Coordinator) {
+        coordinator.detach()
+    }
+
+    final class EventCaptureView: NSView {
+        weak var coordinator: Coordinator?
+
+        override var isFlipped: Bool {
+            true
+        }
+
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            nil
+        }
+    }
+
+    final class Coordinator {
+        var onZoom: (CGFloat, CGPoint) -> Void
+
+        private weak var view: NSView?
+        private var eventMonitor: Any?
+
+        init(onZoom: @escaping (CGFloat, CGPoint) -> Void) {
+            self.onZoom = onZoom
+        }
+
+        func attach(to view: NSView) {
+            self.view = view
+
+            guard eventMonitor == nil else {
+                return
+            }
+
+            eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel, .magnify]) { [weak self] event in
+                self?.handle(event) ?? event
+            }
+        }
+
+        func detach() {
+            if let eventMonitor {
+                NSEvent.removeMonitor(eventMonitor)
+                self.eventMonitor = nil
+            }
+        }
+
+        private func handle(_ event: NSEvent) -> NSEvent? {
+            guard
+                let view,
+                event.window === view.window,
+                let location = location(for: event, in: view)
+            else {
+                return event
+            }
+
+            switch event.type {
+            case .scrollWheel:
+                let rawDelta = event.scrollingDeltaY
+                guard abs(rawDelta) > 0.01 else {
+                    return event
+                }
+
+                let normalizedDelta = event.hasPreciseScrollingDeltas ? rawDelta : rawDelta * 12
+                let rawFactor = CGFloat(pow(1.0018, Double(normalizedDelta)))
+                let factor = min(max(rawFactor, 0.85), 1.15)
+                onZoom(factor, location)
+                return nil
+
+            case .magnify:
+                let factor = min(max(1 + event.magnification, 0.8), 1.25)
+                onZoom(factor, location)
+                return nil
+
+            default:
+                return event
+            }
+        }
+
+        private func location(for event: NSEvent, in view: NSView) -> CGPoint? {
+            let location = view.convert(event.locationInWindow, from: nil)
+
+            guard view.bounds.contains(location) else {
+                return nil
+            }
+
+            return CGPoint(x: location.x, y: location.y)
         }
     }
 }
@@ -406,23 +590,12 @@ private struct IngredientGraphNodeBubble: View {
         )
         .scaleEffect(isDragging ? 1.06 : (isDimmed ? 0.94 : 1))
         .overlay(alignment: .top) {
-            VStack(spacing: 2) {
-                if let amount = node.amount {
-                    Text(amount)
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-
-                Text(node.name)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.center)
-            }
-            .frame(maxWidth: radius * 2.8)
-            .offset(y: radius * 2 + 6)
-            .opacity(isDimmed ? 0.3 : 1)
+            Text(node.name)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: true, vertical: false)
+                .offset(y: radius * 2 + 6)
+                .opacity(isDimmed ? 0.3 : 1)
         }
         .opacity(isDimmed ? 0.55 : 1)
         .saturation(isDimmed ? 0.25 : 1)

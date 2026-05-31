@@ -8,15 +8,12 @@ import Foundation
 enum RecipeMarkdownRenderer {
     static func render(
         recipe: GeneratedRecipe,
-        framework: RecipeFramework,
-        selections: RecipeSelections
+        framework: RecipeFramework
     ) -> String {
         renderDocument(framework: framework) {
             [
                 htmlTitle(recipe.title, framework: framework),
                 paragraph(recipe.summary),
-                section("Selected Ingredients"),
-                bullets(selectionLines(framework: framework, selections: selections)),
                 section("Ingredients"),
                 bullets(recipe.ingredients, emptyMessage: "No ingredients generated yet."),
                 section("Steps"),
@@ -50,12 +47,10 @@ enum RecipeMarkdownRenderer {
                 blocks.append(section("Start Building"))
                 blocks.append(paragraph("Add a prompt above, pick ingredients, or both to generate a recipe."))
             } else {
-                blocks.append(section("Selected Ingredients"))
-                blocks.append(bullets(selectionLines(framework: framework, selections: selections)))
                 blocks.append(section("Preview"))
                 blocks.append(
                     paragraph(
-                        "Your selected ingredients will appear here immediately. When the selected MLX model is downloaded, this pane updates with a generated recipe after each change."
+                        "When the selected MLX model is downloaded, this pane updates with a generated recipe after each change."
                     )
                 )
             }
@@ -113,20 +108,5 @@ enum RecipeMarkdownRenderer {
                 "\(index + 1). \(MarkdownToHTML.escapeMarkdown(item))"
             }
             .joined(separator: "\n")
-    }
-
-    private static func selectionLines(
-        framework: RecipeFramework,
-        selections: RecipeSelections
-    ) -> [String] {
-        framework.applicableCategories.compactMap { category in
-            let items = selections.selectedItems(for: category)
-
-            guard !items.isEmpty else {
-                return nil
-            }
-
-            return "\(category.title): \(items.joined(separator: ", "))"
-        }
     }
 }

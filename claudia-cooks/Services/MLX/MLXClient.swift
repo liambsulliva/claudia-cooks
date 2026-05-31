@@ -111,6 +111,7 @@ struct MLXClient: Sendable {
                 ingredientNames
                     .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                     .filter { !$0.isEmpty }
+                    .filter { !RecipeMarkdownIngredientsParser.isLikelyStepContent($0) }
             )
         ).sorted()
 

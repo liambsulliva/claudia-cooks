@@ -52,6 +52,19 @@ struct IngredientGraphData: Equatable {
         min(1.2 + CGFloat(edge.recipeCount - 1) * 1.4, 8)
     }
 
+    /// Scales edge length and layout radii as the graph grows so connected nodes stay separated.
+    func spacingMultiplier(in size: CGSize) -> CGFloat {
+        guard nodes.count > 1 else {
+            return 1
+        }
+
+        let count = CGFloat(nodes.count)
+        let densityBoost = sqrt(count / 3)
+        let canvasSide = max(min(size.width, size.height) - 110, 1)
+        let canvasBoost = canvasSide / 380
+        return min(max(densityBoost, canvasBoost, 1), 3.2)
+    }
+
     func positions(in size: CGSize) -> [String: CGPoint] {
         guard !nodes.isEmpty else {
             return [:]
@@ -59,7 +72,8 @@ struct IngredientGraphData: Equatable {
 
         let center = CGPoint(x: size.width / 2, y: size.height / 2)
         let drawableSide = max(min(size.width, size.height) - 110, 1)
-        let mainRadius = max(drawableSide * 0.34, nodes.count == 1 ? 0 : 72)
+        let spacingScale = spacingMultiplier(in: size)
+        let mainRadius = max(drawableSide * 0.34 * spacingScale, nodes.count == 1 ? 0 : 72 * spacingScale)
         let categories = visibleCategories
 
         return categories.enumerated().reduce(into: [:]) { result, categoryEntry in
@@ -80,7 +94,10 @@ struct IngredientGraphData: Equatable {
             let categoryCenter = categories.count == 1
                 ? center
                 : Self.layoutPoint(from: center, angle: categoryAngle, radius: mainRadius)
-            let clusterRadius = min(max(CGFloat(categoryNodes.count) * 8, 24), max(mainRadius * 0.34, 24))
+            let clusterRadius = min(
+                max(CGFloat(categoryNodes.count) * 8 * spacingScale, 24 * spacingScale),
+                max(mainRadius * 0.34, 24 * spacingScale)
+            )
 
             for nodeEntry in categoryNodes.enumerated() {
                 let node = nodeEntry.element
@@ -132,6 +149,10 @@ enum IngredientGraphBuilder {
 
         for recipe in recipes where !recipe.isBlank {
             pendingEntries.append(contentsOf: entries(for: recipe, recipeMarkdown: recipeMarkdown))
+        }
+
+        pendingEntries.removeAll { entry in
+            RecipeMarkdownIngredientsParser.isLikelyStepContent(entry.name)
         }
 
         guard !pendingEntries.isEmpty else {
@@ -275,7 +296,11 @@ enum IngredientGraphBuilder {
         if let markdown = recipeMarkdown(recipe) {
             let generatedLines = RecipeMarkdownIngredientsParser.ingredients(from: markdown)
             if !generatedLines.isEmpty {
-                return generatedLines.map { line in
+                return generatedLines.compactMap { line in
+                    guard !RecipeMarkdownIngredientsParser.isLikelyStepContent(line, markdown: markdown) else {
+                        return nil
+                    }
+
                     let parsed = IngredientLineParser.parse(line)
                     return IngredientGraphEntry(
                         recipeID: recipe.id,
@@ -307,6 +332,10 @@ enum IngredientGraphBuilder {
             }
 
             for otherIngredient in splitOtherIngredients(selections.otherText[category, default: ""]) {
+                guard !RecipeMarkdownIngredientsParser.isLikelyStepContent(otherIngredient) else {
+                    continue
+                }
+
                 let parsed = IngredientLineParser.parse(otherIngredient)
                 entries.append(
                     IngredientGraphEntry(
