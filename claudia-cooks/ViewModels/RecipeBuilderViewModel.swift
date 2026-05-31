@@ -10,25 +10,30 @@ import Observation
 @Observable
 final class RecipeBuilderViewModel {
     let framework: RecipeFramework
-    var selections = RecipeSelections()
-    var pdfData: Data
+    var selections: RecipeSelections
+    var recipeMarkdown: String
     var isGenerating = false
     var errorMessage: String?
 
-    @ObservationIgnored var onRecipeGenerated: ((GeneratedRecipe, Data) -> Void)?
-    @ObservationIgnored var onPDFDataChanged: ((Data) -> Void)?
+    @ObservationIgnored var onRecipeGenerated: ((GeneratedRecipe, String) -> Void)?
+    @ObservationIgnored var onRecipeMarkdownChanged: ((String) -> Void)?
+    @ObservationIgnored var onSelectionsChanged: ((RecipeSelections) -> Void)?
     var mlxSetup: MLXSetupViewModel
     @ObservationIgnored private let generationService: RecipeGenerationService
     @ObservationIgnored private var debounceTask: Task<Void, Never>?
+    @ObservationIgnored private var makeupDebounceTask: Task<Void, Never>?
     @ObservationIgnored private var generationRequestID = 0
     @ObservationIgnored private var lastStreamRenderInstant: ContinuousClock.Instant?
+    @ObservationIgnored private var lastGeneratedMakeup: IngredientMakeup?
 
     init(
         framework: RecipeFramework,
+        initialSelections: RecipeSelections = RecipeSelections(),
+        initialMarkdown: String? = nil,
+        hadPersistedGeneratedRecipe: Bool = false,
         generationService: RecipeGenerationService? = nil,
         mlxSetup: MLXSetupViewModel? = nil
     ) {
-        let initialSelections = RecipeSelections()
         let service = generationService ?? RecipeGenerationService()
         let setup = mlxSetup ?? MLXSetupViewModel(generationService: service)
 
@@ -36,17 +41,20 @@ final class RecipeBuilderViewModel {
         self.selections = initialSelections
         self.generationService = service
         self.mlxSetup = setup
-        self.pdfData = RecipePDFRenderer.renderSelectionPreview(
+        self.recipeMarkdown = initialMarkdown ?? RecipeMarkdownRenderer.renderSelectionPreview(
             framework: framework,
             selections: initialSelections,
             message: nil
         )
+        self.lastGeneratedMakeup = hadPersistedGeneratedRecipe
+            ? initialSelections.ingredientMakeup
+            : nil
 
         setup.onModelReady = { [weak self] in
-            guard let self, self.selections.canGenerate else {
+            guard let self, !self.selections.ingredientMakeup.isEmpty else {
                 return
             }
-            self.scheduleGeneration()
+            self.scheduleGenerationIfMakeupChanged()
         }
 
         Task {
@@ -57,29 +65,77 @@ final class RecipeBuilderViewModel {
 
     deinit {
         debounceTask?.cancel()
+        makeupDebounceTask?.cancel()
     }
 
     func toggle(_ option: String, in category: IngredientCategory) {
         selections.toggle(option, in: category)
-        scheduleGeneration()
+        persistSelectionsAndRefreshPreview()
+        scheduleGenerationIfMakeupChanged()
     }
 
     func setOtherText(_ text: String, for category: IngredientCategory) {
         selections.setOtherText(text, for: category)
-        scheduleGeneration()
+        persistSelectionsAndRefreshPreview()
+        scheduleGenerationIfMakeupChanged(debounced: true)
     }
 
-    func setCustomPrompt(_ text: String) {
+    func updateRecipePromptDraft(_ text: String) {
         selections.customPrompt = text
+        persistSelectionsAndRefreshPreview()
+    }
+
+    func submitRecipePrompt(_ prompt: String) {
+        selections.customPrompt = prompt
+        clearIngredientSelections()
+        persistSelectionsAndRefreshPreview()
+        scheduleGeneration(force: true)
+    }
+
+    private func clearIngredientSelections() {
+        selections.selectedOptions = [:]
+        selections.otherText = [:]
+    }
+
+    private func persistSelectionsAndRefreshPreview() {
+        onSelectionsChanged?(selections)
+        updateSelectionPreview(message: mlxSetup.modelAvailability ?? errorMessage)
+    }
+
+    private func scheduleGenerationIfMakeupChanged(debounced: Bool = false) {
+        if debounced {
+            makeupDebounceTask?.cancel()
+            makeupDebounceTask = Task { [weak self] in
+                do {
+                    try await Task.sleep(for: .milliseconds(300))
+                } catch {
+                    return
+                }
+
+                guard let self else {
+                    return
+                }
+
+                self.scheduleGenerationIfMakeupChanged()
+            }
+            return
+        }
+
+        guard !selections.ingredientMakeup.isEmpty,
+              selections.ingredientMakeup != lastGeneratedMakeup else {
+            return
+        }
+
         scheduleGeneration()
     }
 
-    func scheduleGeneration() {
+    func scheduleGeneration(force: Bool = false) {
         debounceTask?.cancel()
         generationRequestID += 1
         let requestID = generationRequestID
         let framework = framework
         let selections = selections
+        let forceGeneration = force
 
         debounceTask = Task { [weak self] in
             do {
@@ -95,7 +151,8 @@ final class RecipeBuilderViewModel {
             await self.performGeneration(
                 requestID: requestID,
                 framework: framework,
-                selections: selections
+                selections: selections,
+                force: forceGeneration
             )
         }
     }
@@ -103,7 +160,8 @@ final class RecipeBuilderViewModel {
     private func performGeneration(
         requestID: Int,
         framework: RecipeFramework,
-        selections: RecipeSelections
+        selections: RecipeSelections,
+        force: Bool
     ) async {
         guard requestID == generationRequestID else {
             return
@@ -123,6 +181,14 @@ final class RecipeBuilderViewModel {
             isGenerating = false
             updateSelectionPreview(message: mlxSetup.modelAvailability)
             return
+        }
+
+        if !force {
+            guard !selections.ingredientMakeup.isEmpty,
+                  selections.ingredientMakeup != lastGeneratedMakeup else {
+                isGenerating = false
+                return
+            }
         }
 
         if mlxSetup.modelAvailability != nil {
@@ -153,13 +219,14 @@ final class RecipeBuilderViewModel {
                 return
             }
 
-            let renderedPDF = RecipePDFRenderer.render(
+            let renderedMarkdown = RecipeMarkdownRenderer.render(
                 recipe: recipe,
                 framework: framework,
                 selections: selections
             )
-            setPDFData(renderedPDF)
-            onRecipeGenerated?(recipe, renderedPDF)
+            setRecipeMarkdown(renderedMarkdown)
+            lastGeneratedMakeup = selections.ingredientMakeup
+            onRecipeGenerated?(recipe, renderedMarkdown)
             isGenerating = false
         } catch {
             guard requestID == generationRequestID, !Self.isBenignCancellation(error) else {
@@ -172,14 +239,18 @@ final class RecipeBuilderViewModel {
         }
     }
 
-    private func setPDFData(_ data: Data) {
-        pdfData = data
-        onPDFDataChanged?(data)
+    func updateRecipeMarkdown(_ markdown: String) {
+        recipeMarkdown = markdown
+        onRecipeMarkdownChanged?(markdown)
+    }
+
+    private func setRecipeMarkdown(_ markdown: String) {
+        updateRecipeMarkdown(markdown)
     }
 
     private func updateSelectionPreview(message: String?) {
-        setPDFData(
-            RecipePDFRenderer.renderSelectionPreview(
+        setRecipeMarkdown(
+            RecipeMarkdownRenderer.renderSelectionPreview(
                 framework: framework,
                 selections: selections,
                 message: message
@@ -214,8 +285,8 @@ final class RecipeBuilderViewModel {
             return
         }
 
-        setPDFData(
-            RecipePDFRenderer.render(
+        setRecipeMarkdown(
+            RecipeMarkdownRenderer.render(
                 recipe: partialRecipe,
                 framework: framework,
                 selections: selections

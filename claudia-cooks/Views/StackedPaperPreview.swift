@@ -7,7 +7,8 @@ import SwiftUI
 
 struct PaperSheet: Identifiable, Equatable {
     let id: UUID
-    let data: Data?
+    let markdown: String?
+    let clickedBadgeIDs: Set<String>
     let isBlank: Bool
     let framework: RecipeFramework
 }
@@ -18,6 +19,8 @@ struct StackedPaperPreview: View {
     let isGenerating: Bool
     let maxPaperHeight: CGFloat
     var containerWidth: CGFloat?
+    var onBadgeToggle: ((String, Bool) -> Void)?
+    var onMarkdownChange: ((UUID, String) -> Void)?
 
     @State private var hasRaisedStack = false
 
@@ -37,7 +40,9 @@ struct StackedPaperPreview: View {
             ZStack(alignment: .bottomTrailing) {
                 ForEach(Array(orderedSheets.enumerated()), id: \.element.id) { index, sheet in
                     let depthFromTop = orderedSheets.count - index - 1
-                    paperView(for: sheet, isActive: sheet.id == selectedSheetID)
+                    let isActive = sheet.id == selectedSheetID
+
+                    paperView(for: sheet, isActive: isActive)
                         .frame(width: layout.width, height: layout.height)
                         .scaleEffect(scale(forDepth: depthFromTop), anchor: .bottomTrailing)
                         .rotationEffect(.degrees(rotation(forDepth: depthFromTop)))
@@ -88,10 +93,19 @@ struct StackedPaperPreview: View {
     @ViewBuilder
     private func paperView(for sheet: PaperSheet, isActive: Bool) -> some View {
         Group {
-            if sheet.isBlank || sheet.data == nil {
+            if sheet.isBlank || sheet.markdown == nil {
                 FramedBlankPagePreview(framework: sheet.framework)
-            } else if let data = sheet.data {
-                FramedPDFPreview(data: data)
+            } else if let markdown = sheet.markdown {
+                FramedMarkdownPreview(
+                    markdown: markdown,
+                    framework: sheet.framework,
+                    clickedBadgeIDs: sheet.clickedBadgeIDs,
+                    isInteractive: isActive && !isGenerating,
+                    onBadgeToggle: isActive && !isGenerating ? onBadgeToggle : nil,
+                    onMarkdownChange: isActive && !isGenerating ? { updatedMarkdown in
+                        onMarkdownChange?(sheet.id, updatedMarkdown)
+                    } : nil
+                )
             }
         }
         .background(.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -101,6 +115,7 @@ struct StackedPaperPreview: View {
                     sheet.framework.accentColor.opacity(isActive ? 0.5 : 0.18),
                     lineWidth: isActive ? 1.25 : 1
                 )
+                .allowsHitTesting(false)
         }
         .overlay(alignment: .topTrailing) {
             if isActive {
@@ -109,6 +124,7 @@ struct StackedPaperPreview: View {
                     .frame(width: 9, height: 9)
                     .padding(18)
                     .transition(.scale.combined(with: .opacity))
+                    .allowsHitTesting(false)
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -116,7 +132,7 @@ struct StackedPaperPreview: View {
     }
 
     private var generatingBadge: some View {
-        Label("Updating PDF", systemImage: "sparkles")
+        Label("Updating recipe", systemImage: "sparkles")
             .font(.caption.weight(.semibold))
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
@@ -171,9 +187,9 @@ struct StackedPaperPreview: View {
 
     StackedPaperPreview(
         sheets: [
-            PaperSheet(id: UUID(), data: nil, isBlank: true, framework: .bowl),
-            PaperSheet(id: UUID(), data: nil, isBlank: true, framework: .soup),
-            PaperSheet(id: selectedID, data: nil, isBlank: true, framework: .sandwich)
+            PaperSheet(id: UUID(), markdown: nil, clickedBadgeIDs: [], isBlank: true, framework: .bowl),
+            PaperSheet(id: UUID(), markdown: nil, clickedBadgeIDs: [], isBlank: true, framework: .soup),
+            PaperSheet(id: selectedID, markdown: nil, clickedBadgeIDs: [], isBlank: true, framework: .sandwich)
         ],
         selectedSheetID: selectedID,
         isGenerating: true,

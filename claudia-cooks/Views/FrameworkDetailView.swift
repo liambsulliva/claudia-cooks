@@ -17,9 +17,12 @@ struct FrameworkDetailView: View {
     @State private var builderPanelWidth = FrameworkBuildScreenLayout.defaultBuilderPanelWidth
     @State private var previewPanelWidth = FrameworkBuildScreenLayout.defaultPreviewPanelWidth
     @State private var didConfigureSession = false
+    @State private var markdownSaveTask: Task<Void, Never>?
 
     init(
         framework: RecipeFramework,
+        sessionRecipeID: UUID,
+        libraryStore: RecipeLibraryStore,
         initialSelectedRecipeID: UUID? = nil,
         onSelectFramework: @escaping (RecipeFramework) -> Void = { _ in }
     ) {
@@ -27,14 +30,23 @@ struct FrameworkDetailView: View {
         self.initialSelectedRecipeID = initialSelectedRecipeID
         self.onSelectFramework = onSelectFramework
 
-        let sessionID = UUID()
-        let viewModel = RecipeBuilderViewModel(framework: framework)
+        let savedRecipe = libraryStore.recipe(for: sessionRecipeID)
+        let initialSelections = RecipeSelections(stored: savedRecipe?.selections ?? StoredRecipeSelections())
+        let hadPersistedGeneratedRecipe = savedRecipe.map { !$0.isBlank && !$0.fileName.isEmpty } ?? false
+        let initialMarkdown = savedRecipe.flatMap { libraryStore.recipeMarkdown(for: $0) }
+
+        let viewModel = RecipeBuilderViewModel(
+            framework: framework,
+            initialSelections: initialSelections,
+            initialMarkdown: initialMarkdown,
+            hadPersistedGeneratedRecipe: hadPersistedGeneratedRecipe
+        )
         _viewModel = State(initialValue: viewModel)
         _session = State(
             initialValue: RecipeSessionController(
-                sessionID: sessionID,
+                sessionID: sessionRecipeID,
                 framework: framework,
-                livePDFData: viewModel.pdfData
+                liveRecipeMarkdown: viewModel.recipeMarkdown
             )
         )
     }
@@ -140,23 +152,51 @@ struct FrameworkDetailView: View {
 
     private func previewPanel(maxPaperHeight: CGFloat) -> some View {
         StackedPaperPreview(
-            sheets: session.paperSheets(selections: viewModel.selections, libraryStore: libraryStore),
+            sheets: session.paperSheets(
+                selections: viewModel.selections,
+                libraryStore: libraryStore,
+                sessionMarkdown: viewModel.recipeMarkdown
+            ),
             selectedSheetID: session.activeSheetID,
             isGenerating: session.selectedRecipe == nil
                 && !session.isBlankPage(selections: viewModel.selections, libraryStore: libraryStore)
                 && viewModel.isGenerating,
             maxPaperHeight: maxPaperHeight,
-            containerWidth: previewPanelWidth
+            containerWidth: previewPanelWidth,
+            onBadgeToggle: { badgeID, isClicked in
+                session.toggleBadge(badgeID, isClicked: isClicked, libraryStore: libraryStore)
+            },
+            onMarkdownChange: { recipeID, markdown in
+                updateMarkdown(markdown, for: recipeID)
+            }
         )
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private func updateMarkdown(_ markdown: String, for recipeID: UUID) {
+        if recipeID == session.sessionID {
+            viewModel.updateRecipeMarkdown(markdown)
+            session.liveRecipeMarkdown = markdown
+        }
+
+        markdownSaveTask?.cancel()
+        markdownSaveTask = Task {
+            do {
+                try await Task.sleep(for: .milliseconds(350))
+            } catch {
+                return
+            }
+
+            libraryStore.updateRecipeMarkdown(markdown, for: recipeID)
+        }
     }
 
     private var fileSystemSection: some View {
         FileSystemSection(
             recipes: libraryStore.recipes,
             selectedRecipeID: session.selectedRecipe?.id,
-            pdfData: { recipe in
-                session.pdfData(for: recipe, libraryStore: libraryStore)
+            recipeMarkdown: { recipe in
+                session.recipeMarkdown(for: recipe, libraryStore: libraryStore)
             },
             isBlank: { recipe in
                 session.isBlankSheet(
@@ -181,7 +221,8 @@ struct FrameworkDetailView: View {
                 withAnimation(.easeInOut(duration: 0.18)) {
                     showFrameworkPicker = true
                 }
-            }
+            },
+            allowsKeyboardNavigation: !showFrameworkPicker && !viewModel.mlxSetup.showModelSetupSheet
         )
     }
 
@@ -197,15 +238,28 @@ struct FrameworkDetailView: View {
             session.selectedRecipe = recipe
         }
 
-        session.ensureBlankSession(libraryStore: libraryStore)
-        session.livePDFData = viewModel.pdfData
+        session.ensureBlankSession(
+            libraryStore: libraryStore,
+            selections: viewModel.selections
+        )
+        session.loadPersistedBadgeState(libraryStore: libraryStore)
+        session.liveRecipeMarkdown = viewModel.recipeMarkdown
 
-        viewModel.onPDFDataChanged = { data in
-            session.livePDFData = data
+        viewModel.onRecipeMarkdownChanged = { markdown in
+            session.liveRecipeMarkdown = markdown
         }
 
-        viewModel.onRecipeGenerated = { recipe, pdfData in
-            session.upsertGeneratedRecipe(recipe, pdfData: pdfData, libraryStore: libraryStore)
+        viewModel.onSelectionsChanged = { selections in
+            libraryStore.updateSelections(selections, for: session.sessionID)
+        }
+
+        viewModel.onRecipeGenerated = { recipe, recipeMarkdown in
+            session.upsertGeneratedRecipe(
+                recipe,
+                recipeMarkdown: recipeMarkdown,
+                selections: viewModel.selections,
+                libraryStore: libraryStore
+            )
         }
     }
 
@@ -225,7 +279,11 @@ struct FrameworkDetailView: View {
     @Previewable @State var libraryStore = RecipeLibraryStore()
 
     NavigationStack {
-        FrameworkDetailView(framework: .bowl)
+        FrameworkDetailView(
+            framework: .bowl,
+            sessionRecipeID: UUID(),
+            libraryStore: libraryStore
+        )
             .frame(
                 width: AppWindowMetrics.builderMinimumSize.width,
                 height: AppWindowMetrics.builderMinimumSize.height

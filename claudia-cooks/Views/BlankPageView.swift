@@ -10,6 +10,22 @@ enum BlankPageStyle {
     case thumbnail
 }
 
+struct FramedBlankPagePreview: View {
+    let framework: RecipeFramework
+
+    var body: some View {
+        BlankPageView(framework: framework, style: .full)
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(.separator.opacity(0.55), lineWidth: 1)
+                    .allowsHitTesting(false)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
 struct BlankPageView: View {
     let framework: RecipeFramework
     let style: BlankPageStyle

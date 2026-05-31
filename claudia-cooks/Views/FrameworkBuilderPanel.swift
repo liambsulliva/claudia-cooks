@@ -8,6 +8,7 @@ import SwiftUI
 struct FrameworkBuilderPanel: View {
     let framework: RecipeFramework
     @Bindable var viewModel: RecipeBuilderViewModel
+    @State private var draftPrompt = ""
 
     var body: some View {
         ScrollView {
@@ -36,6 +37,9 @@ struct FrameworkBuilderPanel: View {
             .padding(24)
         }
         .background(Color(nsColor: .windowBackgroundColor))
+        .onAppear {
+            draftPrompt = viewModel.selections.customPrompt
+        }
     }
 
     @ViewBuilder
@@ -59,24 +63,51 @@ struct FrameworkBuilderPanel: View {
 
     private var recipePromptField: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label("Recipe prompt", systemImage: "sparkles")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
+            HStack {
+                Label("Recipe prompt", systemImage: "sparkles")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+
+                Button("Generate", action: submitRecipePrompt)
+                    .buttonStyle(.glassProminent)
+                    .buttonBorderShape(.capsule)
+                    .controlSize(.small)
+                    .disabled(!canSubmitRecipePrompt)
+            }
 
             TextField(
                 "Describe what you want to cook, or pick ingredients below…",
-                text: Binding(
-                    get: { viewModel.selections.customPrompt },
-                    set: { viewModel.setCustomPrompt($0) }
-                ),
+                text: $draftPrompt,
                 axis: .vertical
             )
             .textFieldStyle(.plain)
             .lineLimit(3...8)
+            .onChange(of: draftPrompt) { _, newValue in
+                viewModel.updateRecipePromptDraft(newValue)
+            }
+            .onSubmit(submitRecipePrompt)
+            .onKeyPress(.return, phases: .down) { _ in
+                submitRecipePrompt()
+                return .handled
+            }
             .padding(12)
             .frame(maxWidth: .infinity, minHeight: 88, alignment: .topLeading)
             .background(.background, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+            Text("Press Return or click Generate to run the model.")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
         }
+    }
+
+    private var canSubmitRecipePrompt: Bool {
+        !draftPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func submitRecipePrompt() {
+        viewModel.submitRecipePrompt(draftPrompt)
     }
 
     private var header: some View {

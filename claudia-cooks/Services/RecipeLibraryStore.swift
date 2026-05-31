@@ -15,7 +15,7 @@ final class RecipeLibraryStore {
     @ObservationIgnored private let fileManager: FileManager
     @ObservationIgnored private let libraryURL: URL
     @ObservationIgnored private let manifestURL: URL
-    @ObservationIgnored private var pdfCache: [UUID: Data] = [:]
+    @ObservationIgnored private var markdownCache: [UUID: String] = [:]
 
     init(fileManager: FileManager = .default) {
         self.fileManager = fileManager
@@ -34,7 +34,11 @@ final class RecipeLibraryStore {
         recipes.first { $0.id == sessionID }
     }
 
-    func ensureBlankSession(sessionID: UUID, framework: RecipeFramework) {
+    func ensureBlankSession(
+        sessionID: UUID,
+        framework: RecipeFramework,
+        selections: RecipeSelections = RecipeSelections()
+    ) {
         guard !recipes.contains(where: { $0.id == sessionID }) else {
             return
         }
@@ -48,7 +52,8 @@ final class RecipeLibraryStore {
                 createdAt: now,
                 updatedAt: now,
                 fileName: "",
-                isBlank: true
+                isBlank: true,
+                selections: selections.stored
             ),
             at: 0
         )
@@ -62,21 +67,71 @@ final class RecipeLibraryStore {
         }
     }
 
-    func upsert(sessionID: UUID, title: String, framework: RecipeFramework, pdfData: Data) {
+    func updateRecipeMarkdown(_ markdown: String, for recipeID: UUID) {
+        guard let index = recipes.firstIndex(where: { $0.id == recipeID }) else {
+            return
+        }
+
+        do {
+            try ensureLibraryDirectory()
+
+            let fileName = recipes[index].fileName.isEmpty
+                ? "\(recipeID.uuidString).md"
+                : recipes[index].fileName
+            let fileURL = libraryURL.appendingPathComponent(fileName, isDirectory: false)
+            try markdown.write(to: fileURL, atomically: true, encoding: .utf8)
+
+            recipes[index].fileName = fileName
+            recipes[index].isBlank = false
+            recipes[index].updatedAt = Date()
+            markdownCache[recipeID] = markdown
+            try persistManifest()
+            errorMessage = nil
+        } catch {
+            errorMessage = "Recipe library could not save this recipe."
+        }
+    }
+
+    func updateSelections(_ selections: RecipeSelections, for recipeID: UUID) {
+        guard let index = recipes.firstIndex(where: { $0.id == recipeID }) else {
+            return
+        }
+
+        recipes[index].selections = selections.stored
+        recipes[index].updatedAt = Date()
+
+        do {
+            try persistManifest()
+            errorMessage = nil
+        } catch {
+            errorMessage = "Recipe library could not save ingredient selections."
+        }
+    }
+
+    func upsert(
+        sessionID: UUID,
+        title: String,
+        framework: RecipeFramework,
+        recipeMarkdown: String,
+        selections: RecipeSelections
+    ) {
         do {
             try ensureLibraryDirectory()
 
             let now = Date()
-            let fileName = "\(sessionID.uuidString).pdf"
+            let fileName = "\(sessionID.uuidString).md"
             let fileURL = libraryURL.appendingPathComponent(fileName, isDirectory: false)
-            try pdfData.write(to: fileURL, options: .atomic)
+            try recipeMarkdown.write(to: fileURL, atomically: true, encoding: .utf8)
 
             if let existingIndex = recipes.firstIndex(where: { $0.id == sessionID }) {
+                let clickedBadgeIDs = recipes[existingIndex].clickedBadgeIDs
                 recipes[existingIndex].title = title
                 recipes[existingIndex].framework = framework
                 recipes[existingIndex].updatedAt = now
                 recipes[existingIndex].fileName = fileName
                 recipes[existingIndex].isBlank = false
+                recipes[existingIndex].clickedBadgeIDs = clickedBadgeIDs
+                recipes[existingIndex].selections = selections.stored
             } else {
                 recipes.append(
                     SavedRecipe(
@@ -86,17 +141,18 @@ final class RecipeLibraryStore {
                         createdAt: now,
                         updatedAt: now,
                         fileName: fileName,
-                        isBlank: false
+                        isBlank: false,
+                        selections: selections.stored
                     )
                 )
             }
 
             recipes.sort { $0.updatedAt > $1.updatedAt }
-            pdfCache[sessionID] = pdfData
+            markdownCache[sessionID] = recipeMarkdown
             try persistManifest()
             errorMessage = nil
         } catch {
-            errorMessage = "Recipe library could not save this PDF."
+            errorMessage = "Recipe library could not save this recipe."
         }
     }
 
@@ -114,7 +170,7 @@ final class RecipeLibraryStore {
                 try fileManager.removeItem(at: fileURL)
             }
 
-            pdfCache.removeValue(forKey: recipe.id)
+            markdownCache.removeValue(forKey: recipe.id)
             recipes.removeAll { $0.id == recipe.id }
             try persistManifest()
             errorMessage = nil
@@ -123,22 +179,37 @@ final class RecipeLibraryStore {
         }
     }
 
-    func pdfData(for recipe: SavedRecipe) -> Data? {
+    func setClickedBadgeIDs(_ badgeIDs: Set<String>, for recipeID: UUID) {
+        guard let index = recipes.firstIndex(where: { $0.id == recipeID }) else {
+            return
+        }
+
+        recipes[index].clickedBadgeIDs = badgeIDs
+
+        do {
+            try persistManifest()
+            errorMessage = nil
+        } catch {
+            errorMessage = "Recipe library could not save badge state."
+        }
+    }
+
+    func recipeMarkdown(for recipe: SavedRecipe) -> String? {
         guard !recipe.isBlank else {
             return nil
         }
 
-        if let cachedData = pdfCache[recipe.id] {
-            return cachedData
+        if let cachedMarkdown = markdownCache[recipe.id] {
+            return cachedMarkdown
         }
 
         let fileURL = libraryURL.appendingPathComponent(recipe.fileName, isDirectory: false)
-        guard let data = try? Data(contentsOf: fileURL) else {
+        guard let markdown = try? String(contentsOf: fileURL, encoding: .utf8) else {
             return nil
         }
 
-        pdfCache[recipe.id] = data
-        return data
+        markdownCache[recipe.id] = markdown
+        return markdown
     }
 
     private func load() {

@@ -8,6 +8,7 @@ import SwiftUI
 struct ContentView: View {
     @Environment(RecipeLibraryStore.self) private var libraryStore
     @State private var activeFramework: RecipeFramework?
+    @State private var activeSessionRecipeID: UUID?
     @State private var initialSelectedRecipeID: UUID?
 
     private var windowMode: AppWindowMode {
@@ -16,17 +17,19 @@ struct ContentView: View {
 
     var body: some View {
         Group {
-            if let activeFramework {
+            if let activeFramework, let activeSessionRecipeID {
                 NavigationStack {
                     FrameworkDetailView(
                         framework: activeFramework,
+                        sessionRecipeID: activeSessionRecipeID,
+                        libraryStore: libraryStore,
                         initialSelectedRecipeID: initialSelectedRecipeID
                     ) { selectedFramework in
                         initialSelectedRecipeID = nil
-                        self.activeFramework = selectedFramework
+                        activateBuilder(for: selectedFramework)
                     }
                 }
-                .id(activeFramework)
+                .id(activeSessionRecipeID)
             } else {
                 frameworkPickerRoot
             }
@@ -41,14 +44,26 @@ struct ContentView: View {
             return
         }
 
-        activeFramework = mostRecent.framework
-        initialSelectedRecipeID = mostRecent.id
+        activateBuilder(for: mostRecent.framework, preferredRecipeID: mostRecent.id)
+    }
+
+    private func activateBuilder(
+        for framework: RecipeFramework,
+        preferredRecipeID: UUID? = nil
+    ) {
+        let recipeID = preferredRecipeID
+            ?? libraryStore.recipes.first(where: { $0.framework == framework })?.id
+            ?? UUID()
+
+        activeFramework = framework
+        activeSessionRecipeID = recipeID
+        initialSelectedRecipeID = preferredRecipeID
     }
 
     private var frameworkPickerRoot: some View {
         ScrollView {
             RecipeFrameworksSection { framework in
-                activeFramework = framework
+                activateBuilder(for: framework)
             }
             .padding(32)
             .frame(maxWidth: AppWindowMetrics.pickerSize.width - 64)

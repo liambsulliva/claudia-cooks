@@ -4,19 +4,19 @@
 //
 
 import AppKit
-import PDFKit
 import SwiftUI
 
 struct FileSystemSection: View {
     let recipes: [SavedRecipe]
     let selectedRecipeID: UUID?
-    let pdfData: (SavedRecipe) -> Data?
+    let recipeMarkdown: (SavedRecipe) -> String?
     let isBlank: (SavedRecipe) -> Bool
     let fileURL: (SavedRecipe) -> URL?
     let libraryFolderURL: URL
     let onSelectRecipe: (SavedRecipe) -> Void
     let onDeleteRecipe: (SavedRecipe) -> Void
     let onAddMore: () -> Void
+    var allowsKeyboardNavigation = true
 
     @State private var recipePendingDeletion: SavedRecipe?
 
@@ -27,17 +27,36 @@ struct FileSystemSection: View {
             if recipes.isEmpty {
                 emptyState
             } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 12) {
-                        ForEach(recipes) { recipe in
-                            recipeCard(recipe)
+                ScrollViewReader { scrollProxy in
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 12) {
+                            ForEach(recipes) { recipe in
+                                recipeCard(recipe)
+                                    .id(recipe.id)
+                            }
+                        }
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 4)
+                    }
+                    .contentMargins(.horizontal, 0, for: .scrollContent)
+                    .onChange(of: selectedRecipeID) { _, recipeID in
+                        guard let recipeID else {
+                            return
+                        }
+
+                        withAnimation(.easeInOut(duration: 0.22)) {
+                            scrollProxy.scrollTo(recipeID, anchor: .center)
                         }
                     }
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 4)
                 }
-                .contentMargins(.horizontal, 0, for: .scrollContent)
             }
+        }
+        .background {
+            HorizontalArrowKeyMonitor(
+                isEnabled: allowsKeyboardNavigation && !recipes.isEmpty,
+                onLeftArrow: { navigateSelection(by: -1) },
+                onRightArrow: { navigateSelection(by: 1) }
+            )
         }
         .padding(.vertical, 16)
         .background {
@@ -138,9 +157,10 @@ struct FileSystemSection: View {
         let cardShape = RoundedRectangle(cornerRadius: 18, style: .continuous)
 
         return HStack(spacing: 12) {
-            PDFThumbnailView(
-                data: pdfData(recipe),
+            MarkdownThumbnailView(
+                markdown: recipeMarkdown(recipe),
                 framework: recipe.framework,
+                clickedBadgeIDs: recipe.clickedBadgeIDs,
                 isBlank: isBlank(recipe)
             )
             .frame(width: 56, height: 74)
@@ -201,6 +221,22 @@ struct FileSystemSection: View {
         }
     }
 
+    private func navigateSelection(by offset: Int) {
+        guard !recipes.isEmpty else {
+            return
+        }
+
+        let currentIndex = recipes.firstIndex { $0.id == selectedRecipeID }
+        let baseIndex = currentIndex ?? 0
+        let newIndex = min(max(0, baseIndex + offset), recipes.count - 1)
+
+        if currentIndex == newIndex, currentIndex != nil {
+            return
+        }
+
+        onSelectRecipe(recipes[newIndex])
+    }
+
     private func showInFinder(_ recipe: SavedRecipe) {
         let url = fileURL(recipe) ?? libraryFolderURL
         NSWorkspace.shared.activateFileViewerSelecting([url])
@@ -213,20 +249,24 @@ struct FileSystemSection: View {
     }
 }
 
-private struct PDFThumbnailView: View {
-    let data: Data?
+private struct MarkdownThumbnailView: View {
+    let markdown: String?
     let framework: RecipeFramework
+    var clickedBadgeIDs: Set<String> = []
     var isBlank: Bool = false
 
     var body: some View {
         Group {
             if isBlank {
                 BlankPageView(framework: framework, style: .thumbnail)
-            } else if let image = thumbnailImage {
-                Image(nsImage: image)
-                    .resizable()
-                    .scaledToFit()
-                    .background(.white)
+            } else if let markdown {
+                MarkdownRecipePreview(
+                    markdown: markdown,
+                    framework: framework,
+                    clickedBadgeIDs: clickedBadgeIDs,
+                    isInteractive: false
+                )
+                .allowsHitTesting(false)
             } else {
                 Image(systemName: "doc.richtext")
                     .font(.title2)
@@ -236,22 +276,13 @@ private struct PDFThumbnailView: View {
             }
         }
     }
-
-    private var thumbnailImage: NSImage? {
-        guard let data else {
-            return nil
-        }
-
-        return PDFDocument.from(data: data)?
-            .firstPageThumbnail(size: CGSize(width: 112, height: 148))
-    }
 }
 
 #Preview {
     FileSystemSection(
         recipes: [],
         selectedRecipeID: nil,
-        pdfData: { _ in nil },
+        recipeMarkdown: { _ in nil },
         isBlank: { _ in true },
         fileURL: { _ in nil },
         libraryFolderURL: FileManager.default.temporaryDirectory,

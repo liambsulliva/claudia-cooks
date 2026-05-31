@@ -21,7 +21,7 @@ struct MLXModelSetupSheet: View {
             Text(
                 """
                 MLX runs local inference directly on Apple Silicon. Choose which fast Qwen model \
-                size to download for recipe and PDF generation.
+                size to download for on-device recipe generation.
                 """
             )
             .font(.body)
