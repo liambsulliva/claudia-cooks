@@ -39,7 +39,9 @@ struct FrameworkBuilderPanel: View {
                     }
                 )
             }
-            .padding(24)
+            .padding(.horizontal, FrameworkBuildScreenLayout.builderPanelContentPadding)
+            .padding(.top, FrameworkBuildScreenLayout.builderPanelContentPadding)
+            .padding(.bottom, FrameworkBuildScreenLayout.builderPanelContentBottomPadding)
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {

@@ -12,6 +12,8 @@ enum FrameworkBuildScreenLayout {
     static let paperStackTopInset: CGFloat = 12
     /// Space between the window top and the builder panel / paper stack.
     static let editorContentTopInset: CGFloat = 24
+    static let builderPanelContentPadding: CGFloat = 24
+    static let builderPanelContentBottomPadding: CGFloat = 48
     static let maxPaperHeightFraction: CGFloat = 0.82
     static let centerStageBreakpoint: CGFloat = 1200
     static let centerStageMaxWidth: CGFloat = 1200

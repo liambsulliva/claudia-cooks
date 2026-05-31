@@ -94,8 +94,7 @@ struct FrameworkDetailView: View {
                 .disabled(showFrameworkPicker)
 
                 screenModePicker
-                    .padding(.top, 16)
-                    .padding(.trailing, 24)
+                    .padding(.top, 12)
                     .zIndex(20)
 
                 if showFrameworkPicker {
@@ -220,7 +219,7 @@ struct FrameworkDetailView: View {
     }
 
     private var screenModePicker: some View {
-        Picker("Screen mode", selection: $screenMode) {
+        Picker(selection: $screenMode, label: EmptyView()) {
             ForEach(FrameworkDetailScreenMode.allCases) { mode in
                 Label(mode.title, systemImage: mode.icon)
                     .tag(mode)
