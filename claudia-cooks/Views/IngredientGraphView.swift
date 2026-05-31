@@ -324,17 +324,57 @@ private struct InteractiveIngredientGraphCanvas: View {
         return 0
     }
 
+    private func edgeEndpoints(
+        from sourceCenter: CGPoint,
+        sourceRadius: CGFloat,
+        to targetCenter: CGPoint,
+        targetRadius: CGFloat
+    ) -> (start: CGPoint, end: CGPoint)? {
+        let deltaX = targetCenter.x - sourceCenter.x
+        let deltaY = targetCenter.y - sourceCenter.y
+        let distance = hypot(deltaX, deltaY)
+
+        guard distance > 0.001 else {
+            return nil
+        }
+
+        let unitX = deltaX / distance
+        let unitY = deltaY / distance
+
+        return (
+            start: CGPoint(
+                x: sourceCenter.x + unitX * sourceRadius,
+                y: sourceCenter.y + unitY * sourceRadius
+            ),
+            end: CGPoint(
+                x: targetCenter.x - unitX * targetRadius,
+                y: targetCenter.y - unitY * targetRadius
+            )
+        )
+    }
+
     private func drawEdges(in context: inout GraphicsContext) {
         let nodeByID = Dictionary(uniqueKeysWithValues: graph.nodes.map { ($0.id, $0) })
 
         for edge in graph.edges {
-            guard let source = positions[edge.sourceID], let target = positions[edge.targetID] else {
+            guard
+                let sourceCenter = positions[edge.sourceID],
+                let targetCenter = positions[edge.targetID],
+                let sourceNode = nodeByID[edge.sourceID],
+                let targetNode = nodeByID[edge.targetID],
+                let endpoints = edgeEndpoints(
+                    from: sourceCenter,
+                    sourceRadius: graph.radius(for: sourceNode),
+                    to: targetCenter,
+                    targetRadius: graph.radius(for: targetNode)
+                )
+            else {
                 continue
             }
 
             var path = Path()
-            path.move(to: source)
-            path.addLine(to: target)
+            path.move(to: endpoints.start)
+            path.addLine(to: endpoints.end)
 
             var opacity = min(0.16 + CGFloat(edge.recipeCount) * 0.08, 0.58)
             var strokeColor = Color.secondary
@@ -684,8 +724,15 @@ private struct IngredientGraphNodeBubble: View {
     private var countOpacity: Double { isDimmed ? 0.35 : (isConnected ? 0.9 : 1) }
     private var shadowOpacity: Double { isDimmed ? 0.06 : (isDragging ? 0.35 : (isConnected ? 0.14 : 0.18)) }
 
+    private var edgeOcclusionColor: Color {
+        Color(nsColor: .windowBackgroundColor)
+    }
+
     var body: some View {
         ZStack {
+            Circle()
+                .fill(edgeOcclusionColor)
+
             Circle()
                 .fill(
                     LinearGradient(
