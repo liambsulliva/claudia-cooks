@@ -10,12 +10,14 @@ enum FrameworkBuildScreenLayout {
     /// How far the front paper dips into the file-system bar (keep small).
     static let paperOverlapIntoBar: CGFloat = 20
     static let paperStackTopInset: CGFloat = 12
+    /// Space between the window top and the builder panel / paper stack.
+    static let editorContentTopInset: CGFloat = 24
     static let maxPaperHeightFraction: CGFloat = 0.82
     static let centerStageBreakpoint: CGFloat = 1200
     static let centerStageMaxWidth: CGFloat = 1200
     static let centerStageCornerRadius: CGFloat = 18
     static let centerStageHorizontalInset: CGFloat = 24
-    static let centerStageTopInset: CGFloat = 16
+    static let centerStageTopInset: CGFloat = 24
     static let builderPaperSpacing: CGFloat = 32
     static let defaultBuilderPanelWidth: CGFloat = 640
     static let maxBuilderPanelWidth: CGFloat = 800

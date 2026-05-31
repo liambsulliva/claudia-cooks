@@ -16,6 +16,7 @@ struct FrameworkDetailView: View {
     @State private var showFrameworkPicker = false
     @State private var builderPanelWidth = FrameworkBuildScreenLayout.defaultBuilderPanelWidth
     @State private var previewPanelWidth = FrameworkBuildScreenLayout.defaultPreviewPanelWidth
+    @State private var screenMode: FrameworkDetailScreenMode = .editor
     @State private var didConfigureSession = false
     @State private var markdownSaveTask: Task<Void, Never>?
 
@@ -65,46 +66,35 @@ struct FrameworkDetailView: View {
                 180
             )
 
-            ZStack {
+            ZStack(alignment: .topTrailing) {
                 centerStageBackdrop(isActive: useCenterStage)
                     .ignoresSafeArea()
 
-                VStack(spacing: 0) {
-                    buildScreen(
-                        maxPaperHeight: maxPaperHeight,
-                        availablePaperHeight: availablePreviewHeight
-                    )
-                        .frame(maxWidth: useCenterStage ? FrameworkBuildScreenLayout.centerStageMaxWidth : .infinity)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background {
-                            if useCenterStage {
-                                RoundedRectangle(
-                                    cornerRadius: FrameworkBuildScreenLayout.centerStageCornerRadius,
-                                    style: .continuous
-                                )
-                                .fill(Color(nsColor: .windowBackgroundColor))
-                            }
-                        }
-                        .clipShape(
-                            RoundedRectangle(
-                                cornerRadius: useCenterStage ? FrameworkBuildScreenLayout.centerStageCornerRadius : 0,
-                                style: .continuous
-                            )
+                Group {
+                    switch screenMode {
+                    case .editor:
+                        editorScreen(
+                            maxPaperHeight: maxPaperHeight,
+                            availablePreviewHeight: availablePreviewHeight,
+                            useCenterStage: useCenterStage
                         )
-                        .shadow(
-                            color: useCenterStage ? .black.opacity(0.14) : .clear,
-                            radius: useCenterStage ? 20 : 0,
-                            x: 0,
-                            y: useCenterStage ? 10 : 0
-                        )
-                        .padding(.horizontal, useCenterStage ? FrameworkBuildScreenLayout.centerStageHorizontalInset : 0)
-                        .padding(.top, useCenterStage ? FrameworkBuildScreenLayout.centerStageTopInset : 0)
+                        .transition(.opacity)
 
-                    fileSystemSection
-                        .frame(height: FrameworkBuildScreenLayout.fileSystemBarHeight)
-                        .zIndex(10)
+                    case .graph:
+                        IngredientGraphView(
+                            recipes: libraryStore.recipes,
+                            recipeMarkdown: { libraryStore.recipeMarkdown(for: $0) }
+                        )
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .transition(.opacity)
+                    }
                 }
                 .disabled(showFrameworkPicker)
+
+                screenModePicker
+                    .padding(.top, 16)
+                    .padding(.trailing, 24)
+                    .zIndex(20)
 
                 if showFrameworkPicker {
                     FrameworkPickerOverlay(
@@ -112,9 +102,11 @@ struct FrameworkDetailView: View {
                         onClose: closeFrameworkPicker
                     )
                     .transition(.opacity)
+                    .zIndex(30)
                 }
             }
             .animation(.easeInOut(duration: 0.22), value: useCenterStage)
+            .animation(.easeInOut(duration: 0.2), value: screenMode)
         }
         .navigationTitle(framework.title)
         .sheet(isPresented: $viewModel.mlxSetup.showModelSetupSheet) {
@@ -129,6 +121,52 @@ struct FrameworkDetailView: View {
         }
         .interactiveDismissDisabled(viewModel.mlxSetup.isPullingModel)
         .onAppear(perform: configureSession)
+    }
+
+    private func editorScreen(
+        maxPaperHeight: CGFloat,
+        availablePreviewHeight: CGFloat,
+        useCenterStage: Bool
+    ) -> some View {
+        VStack(spacing: 0) {
+            buildScreen(
+                maxPaperHeight: maxPaperHeight,
+                availablePaperHeight: availablePreviewHeight
+            )
+                .frame(maxWidth: useCenterStage ? FrameworkBuildScreenLayout.centerStageMaxWidth : .infinity)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background {
+                    if useCenterStage {
+                        RoundedRectangle(
+                            cornerRadius: FrameworkBuildScreenLayout.centerStageCornerRadius,
+                            style: .continuous
+                        )
+                        .fill(Color(nsColor: .windowBackgroundColor))
+                    }
+                }
+                .clipShape(
+                    RoundedRectangle(
+                        cornerRadius: useCenterStage ? FrameworkBuildScreenLayout.centerStageCornerRadius : 0,
+                        style: .continuous
+                    )
+                )
+                .shadow(
+                    color: useCenterStage ? .black.opacity(0.14) : .clear,
+                    radius: useCenterStage ? 20 : 0,
+                    x: 0,
+                    y: useCenterStage ? 10 : 0
+                )
+                .padding(.horizontal, useCenterStage ? FrameworkBuildScreenLayout.centerStageHorizontalInset : 0)
+                .padding(
+                    .top,
+                    FrameworkBuildScreenLayout.editorContentTopInset
+                        + (useCenterStage ? FrameworkBuildScreenLayout.centerStageTopInset : 0)
+                )
+
+            fileSystemSection
+                .frame(height: FrameworkBuildScreenLayout.fileSystemBarHeight)
+                .zIndex(10)
+        }
     }
 
     @ViewBuilder
@@ -188,6 +226,17 @@ struct FrameworkDetailView: View {
             }
         )
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private var screenModePicker: some View {
+        Picker("Screen mode", selection: $screenMode) {
+            ForEach(FrameworkDetailScreenMode.allCases) { mode in
+                Label(mode.title, systemImage: mode.icon)
+                    .tag(mode)
+            }
+        }
+        .pickerStyle(.segmented)
+        .frame(width: 270)
     }
 
     private func updateMarkdown(_ markdown: String, for recipeID: UUID) {
@@ -287,6 +336,27 @@ struct FrameworkDetailView: View {
     private func closeFrameworkPicker() {
         withAnimation(.easeInOut(duration: 0.18)) {
             showFrameworkPicker = false
+        }
+    }
+}
+
+private enum FrameworkDetailScreenMode: String, CaseIterable, Identifiable {
+    case editor
+    case graph
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .editor: "Editor View"
+        case .graph: "Graph View"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .editor: "doc.richtext"
+        case .graph: "point.3.connected.trianglepath.dotted"
         }
     }
 }

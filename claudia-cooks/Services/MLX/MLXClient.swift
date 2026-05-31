@@ -105,6 +105,121 @@ struct MLXClient: Sendable {
         throw MLXClientError.invalidRecipePayload
     }
 
+    func categorizeIngredients(_ ingredientNames: [String]) async throws -> [String: IngredientCategory] {
+        let uniqueNames = Array(
+            Set(
+                ingredientNames
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+            )
+        ).sorted()
+
+        guard !uniqueNames.isEmpty else {
+            return [:]
+        }
+
+        guard let modelName = await resolvedGenerationModel() else {
+            throw MLXClientError.modelNotFound(activeModel)
+        }
+
+        let container = try await modelCache.container(
+            modelName: modelName,
+            configuration: configuration,
+            progressHandler: nil
+        )
+
+        let session = ChatSession(
+            container,
+            instructions: ingredientCategorySystemPrompt,
+            generateParameters: GenerateParameters(
+                maxTokens: 320,
+                temperature: 0,
+                topP: 0.9,
+                repetitionPenalty: 1.02
+            ),
+            additionalContext: ["enable_thinking": false]
+        )
+
+        let list = uniqueNames
+            .map { "- \(sanitizePromptText($0))" }
+            .joined(separator: "\n")
+
+        var response = ""
+        for try await chunk in session.streamResponse(
+            to: sanitizePromptText(
+                """
+                Classify each ingredient below.
+
+                \(list)
+
+                Return one JSON object. Use each ingredient string exactly as the key.
+                """
+            )
+        ) {
+            response += chunk
+        }
+
+        guard let categories = Self.decodeIngredientCategories(from: response, ingredientNames: uniqueNames) else {
+            throw MLXClientError.invalidCategoryPayload
+        }
+
+        return categories
+    }
+
+    private var ingredientCategorySystemPrompt: String {
+        """
+        You classify cooking ingredients for a recipe graph.
+        Assign each ingredient to exactly one category key: protein, carbs, veg, cheese, aromatics, sauces.
+        Reply with a single JSON object only. No markdown, no code fences, no commentary.
+        Example: {"chicken breasts":"protein","olive oil":"sauces","basil":"aromatics"}
+        """
+    }
+
+    private static func decodeIngredientCategories(
+        from text: String,
+        ingredientNames: [String]
+    ) -> [String: IngredientCategory]? {
+        guard let data = extractJSONObject(from: text)?.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+
+        var categories: [String: IngredientCategory] = [:]
+
+        for name in ingredientNames {
+            let rawValue = stringValue(from: object[name])
+                ?? object.first(where: { IngredientLineParser.normalizedName(for: $0.key) == IngredientLineParser.normalizedName(for: name) })
+                    .flatMap { stringValue(from: $0.value) }
+
+            guard let rawValue, let category = IngredientCategory(rawValue: rawValue.lowercased()) else {
+                continue
+            }
+
+            categories[name] = category
+        }
+
+        return categories.isEmpty ? nil : categories
+    }
+
+    private static func extractJSONObject(from text: String) -> String? {
+        let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let start = normalized.firstIndex(of: "{"),
+           let end = normalized.lastIndex(of: "}") {
+            return String(normalized[start...end])
+        }
+        return nil
+    }
+
+    private static func stringValue(from value: Any?) -> String? {
+        switch value {
+        case let string as String:
+            let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        default:
+            return nil
+        }
+    }
+
     private func resolvedGenerationModel() async -> String? {
         if await isModelAvailable(activeModel) {
             return activeModel
@@ -207,6 +322,7 @@ enum MLXClientError: LocalizedError {
     case invalidModelIdentifier(String)
     case modelNotFound(String)
     case invalidRecipePayload
+    case invalidCategoryPayload
 
     var errorDescription: String? {
         switch self {
@@ -216,6 +332,8 @@ enum MLXClientError: LocalizedError {
             "\(model) is not downloaded yet. Choose a model size to download the MLX model files."
         case .invalidRecipePayload:
             "The recipe JSON from MLX could not be decoded. Try generating again."
+        case .invalidCategoryPayload:
+            "MLX could not classify one or more ingredients. Try again after the model finishes loading."
         }
     }
 }
