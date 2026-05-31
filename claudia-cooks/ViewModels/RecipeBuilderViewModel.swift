@@ -80,6 +80,24 @@ final class RecipeBuilderViewModel {
         scheduleGenerationIfMakeupChanged(debounced: true)
     }
 
+    func loadRecipeState(
+        selections newSelections: RecipeSelections,
+        hadPersistedGeneratedRecipe: Bool
+    ) {
+        debounceTask?.cancel()
+        makeupDebounceTask?.cancel()
+        generationRequestID += 1
+        isGenerating = false
+        errorMessage = nil
+
+        selections = newSelections
+        lastGeneratedMakeup = hadPersistedGeneratedRecipe
+            ? newSelections.ingredientMakeup
+            : nil
+
+        updateSelectionPreview(message: mlxSetup.modelAvailability)
+    }
+
     func updateRecipePromptDraft(_ text: String) {
         selections.customPrompt = text
         persistSelectionsAndRefreshPreview()

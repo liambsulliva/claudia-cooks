@@ -40,6 +40,9 @@ struct FrameworkBuilderPanel: View {
         .onAppear {
             draftPrompt = viewModel.selections.customPrompt
         }
+        .onChange(of: viewModel.selections.customPrompt) { _, newValue in
+            draftPrompt = newValue
+        }
     }
 
     @ViewBuilder

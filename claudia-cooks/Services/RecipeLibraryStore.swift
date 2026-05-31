@@ -16,6 +16,9 @@ final class RecipeLibraryStore {
     @ObservationIgnored private let libraryURL: URL
     @ObservationIgnored private let manifestURL: URL
     @ObservationIgnored private var markdownCache: [UUID: String] = [:]
+    @ObservationIgnored private var directoryWatcher: RecipeLibraryDirectoryWatcher?
+    @ObservationIgnored private var syncDebounceTask: Task<Void, Never>?
+    @ObservationIgnored private var isSyncingFromDisk = false
 
     init(fileManager: FileManager = .default) {
         self.fileManager = fileManager
@@ -24,6 +27,12 @@ final class RecipeLibraryStore {
         self.manifestURL = libraryURL.appendingPathComponent("manifest.json")
 
         load()
+        startWatchingLibraryDirectory()
+    }
+
+    deinit {
+        syncDebounceTask?.cancel()
+        directoryWatcher = nil
     }
 
     var libraryFolderURL: URL {
@@ -195,22 +204,85 @@ final class RecipeLibraryStore {
         return markdown
     }
 
+    /// Reloads manifest metadata and markdown caches after external file changes.
+    func syncFromDisk() {
+        guard !isSyncingFromDisk else {
+            return
+        }
+
+        isSyncingFromDisk = true
+        defer { isSyncingFromDisk = false }
+
+        let previousRecipeIDs = Set(recipes.map(\.id))
+        reloadRecipesFromManifest()
+
+        let removedRecipeIDs = previousRecipeIDs.subtracting(recipes.map(\.id))
+        for recipeID in removedRecipeIDs {
+            markdownCache.removeValue(forKey: recipeID)
+        }
+
+        for recipe in recipes where !recipe.isBlank && !recipe.fileName.isEmpty {
+            markdownCache.removeValue(forKey: recipe.id)
+        }
+    }
+
     private func load() {
         do {
             try ensureLibraryDirectory()
-
-            guard fileManager.fileExists(atPath: manifestURL.path) else {
-                recipes = []
-                return
-            }
-
-            let data = try Data(contentsOf: manifestURL)
-            recipes = try JSONDecoder().decode([SavedRecipe].self, from: data)
-                .sorted { $0.updatedAt > $1.updatedAt }
-            errorMessage = nil
+            reloadRecipesFromManifest()
         } catch {
             recipes = []
             errorMessage = "Recipe library could not be loaded."
+        }
+    }
+
+    private func reloadRecipesFromManifest() {
+        guard fileManager.fileExists(atPath: manifestURL.path) else {
+            recipes = []
+            markdownCache.removeAll()
+            errorMessage = nil
+            return
+        }
+
+        do {
+            let data = try Data(contentsOf: manifestURL)
+            let decodedRecipes = try JSONDecoder().decode([SavedRecipe].self, from: data)
+                .sorted { $0.updatedAt > $1.updatedAt }
+
+            if decodedRecipes != recipes {
+                recipes = decodedRecipes
+            }
+
+            errorMessage = nil
+        } catch {
+            errorMessage = "Recipe library could not be loaded."
+        }
+    }
+
+    private func startWatchingLibraryDirectory() {
+        do {
+            try ensureLibraryDirectory()
+        } catch {
+            return
+        }
+
+        directoryWatcher = RecipeLibraryDirectoryWatcher(libraryURL: libraryURL) { [weak self] in
+            Task { @MainActor in
+                self?.scheduleSyncFromDisk()
+            }
+        }
+    }
+
+    private func scheduleSyncFromDisk() {
+        syncDebounceTask?.cancel()
+        syncDebounceTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: .milliseconds(300))
+            } catch {
+                return
+            }
+
+            self?.syncFromDisk()
         }
     }
 

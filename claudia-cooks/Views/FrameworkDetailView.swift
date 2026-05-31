@@ -121,6 +121,9 @@ struct FrameworkDetailView: View {
         }
         .interactiveDismissDisabled(viewModel.mlxSetup.isPullingModel)
         .onAppear(perform: configureSession)
+        .onChange(of: libraryStore.recipes) { _, _ in
+            reconcileWithLibraryOnDisk()
+        }
     }
 
     private func editorScreen(
@@ -275,13 +278,15 @@ struct FrameworkDetailView: View {
                 libraryStore.fileURL(for: recipe)
             },
             libraryFolderURL: libraryStore.libraryFolderURL,
-            onSelectRecipe: { recipe in
-                withAnimation(.spring(response: 0.48, dampingFraction: 0.82)) {
-                    session.selectedRecipe = recipe
-                }
-            },
+            onSelectRecipe: selectRecipe,
             onDeleteRecipe: { recipe in
+                let deletedEditingRecipe = recipe.id == editingRecipeID
+                libraryStore.updateSelections(viewModel.selections, for: editingRecipeID)
                 session.deleteRecipe(recipe, libraryStore: libraryStore)
+
+                if deletedEditingRecipe, let sessionRecipe = libraryStore.recipe(for: session.sessionID) {
+                    applyBuilderState(for: sessionRecipe)
+                }
             },
             onAddMore: {
                 withAnimation(.easeInOut(duration: 0.18)) {
@@ -290,6 +295,77 @@ struct FrameworkDetailView: View {
             },
             allowsKeyboardNavigation: !showFrameworkPicker && !viewModel.mlxSetup.showModelSetupSheet
         )
+    }
+
+    private var editingRecipeID: UUID {
+        session.selectedRecipe?.id ?? session.sessionID
+    }
+
+    private func reconcileWithLibraryOnDisk() {
+        guard let selectedID = session.selectedRecipe?.id else {
+            return
+        }
+
+        guard let updatedRecipe = libraryStore.recipe(for: selectedID) else {
+            session.selectedRecipe = nil
+            if let sessionRecipe = libraryStore.recipe(for: session.sessionID) {
+                applyBuilderState(for: sessionRecipe)
+            }
+            return
+        }
+
+        let diskSelections = RecipeSelections(stored: updatedRecipe.selections)
+        let selectionsChanged = diskSelections != viewModel.selections
+        session.selectedRecipe = updatedRecipe
+
+        if selectionsChanged {
+            applyBuilderState(for: updatedRecipe)
+            return
+        }
+
+        guard updatedRecipe.id == session.sessionID,
+              let markdown = libraryStore.recipeMarkdown(for: updatedRecipe),
+              !markdown.isEmpty,
+              viewModel.recipeMarkdown != markdown else {
+            return
+        }
+
+        viewModel.updateRecipeMarkdown(markdown)
+        session.liveRecipeMarkdown = markdown
+    }
+
+    private func selectRecipe(_ recipe: SavedRecipe) {
+        let isNewSelection = session.selectedRecipe?.id != recipe.id
+
+        if isNewSelection {
+            libraryStore.updateSelections(viewModel.selections, for: editingRecipeID)
+        }
+
+        withAnimation(.spring(response: 0.48, dampingFraction: 0.82)) {
+            session.selectedRecipe = recipe
+        }
+
+        if isNewSelection {
+            applyBuilderState(for: recipe)
+        }
+    }
+
+    private func applyBuilderState(for recipe: SavedRecipe) {
+        let hadPersistedGeneratedRecipe = !recipe.isBlank && !recipe.fileName.isEmpty
+
+        viewModel.loadRecipeState(
+            selections: RecipeSelections(stored: recipe.selections),
+            hadPersistedGeneratedRecipe: hadPersistedGeneratedRecipe
+        )
+
+        guard recipe.id == session.sessionID else {
+            return
+        }
+
+        if let markdown = libraryStore.recipeMarkdown(for: recipe), !markdown.isEmpty {
+            viewModel.updateRecipeMarkdown(markdown)
+            session.liveRecipeMarkdown = markdown
+        }
     }
 
     private func configureSession() {
@@ -310,12 +386,16 @@ struct FrameworkDetailView: View {
         )
         session.liveRecipeMarkdown = viewModel.recipeMarkdown
 
+        if let selectedRecipe = session.selectedRecipe {
+            applyBuilderState(for: selectedRecipe)
+        }
+
         viewModel.onRecipeMarkdownChanged = { markdown in
             session.liveRecipeMarkdown = markdown
         }
 
         viewModel.onSelectionsChanged = { selections in
-            libraryStore.updateSelections(selections, for: session.sessionID)
+            libraryStore.updateSelections(selections, for: editingRecipeID)
         }
 
         viewModel.onRecipeGenerated = { recipe, recipeMarkdown in
