@@ -243,6 +243,7 @@ struct MLXClient: Sendable {
         You classify cooking ingredients for a recipe graph.
         Assign each ingredient to exactly one category key: protein, carbs, veg, cheese, aromatics, sauces.
         Reply with a single JSON object only. No markdown, no code fences, no commentary.
+        Do not prepend the ingredients with adjectives like "chopped", "sliced", "diced", etc.
         Example: {"chicken breasts":"protein","olive oil":"sauces","basil":"aromatics"}
         """
     }
