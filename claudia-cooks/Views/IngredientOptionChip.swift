@@ -68,6 +68,7 @@ struct IngredientOptionChip: View {
             .tint(category.accentColor)
             .buttonBorderShape(.roundedRectangle(radius: 10))
             .simultaneousGesture(variantHoldGesture)
+            .gesture(RightClickGesture(onRightClick: presentVariantMenuFromRightClick))
         } else {
             Button(action: handleTap) {
                 label
@@ -75,6 +76,7 @@ struct IngredientOptionChip: View {
             .buttonStyle(.glass)
             .buttonBorderShape(.roundedRectangle(radius: 10))
             .simultaneousGesture(variantHoldGesture)
+            .gesture(RightClickGesture(onRightClick: presentVariantMenuFromRightClick))
         }
     }
 
@@ -140,6 +142,16 @@ struct IngredientOptionChip: View {
 
                 dragGlobalLocation = nil
             }
+    }
+
+    private func presentVariantMenuFromRightClick() {
+        guard variants != nil else {
+            return
+        }
+
+        isHoldSelecting = false
+        dragGlobalLocation = nil
+        isMenuPresented = true
     }
 
     private func handleTap() {

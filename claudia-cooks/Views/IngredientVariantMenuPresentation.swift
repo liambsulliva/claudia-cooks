@@ -3,7 +3,24 @@
 //  claudia-cooks
 //
 
+import AppKit
 import SwiftUI
+
+struct RightClickGesture: NSGestureRecognizerRepresentable {
+    let onRightClick: () -> Void
+
+    func makeNSGestureRecognizer(context: Context) -> NSClickGestureRecognizer {
+        let recognizer = NSClickGestureRecognizer()
+        recognizer.buttonMask = 0x2
+        return recognizer
+    }
+
+    func handleNSGestureRecognizerAction(_ recognizer: NSClickGestureRecognizer, context: Context) {
+        onRightClick()
+    }
+
+    func updateNSGestureRecognizer(_ recognizer: NSClickGestureRecognizer, context: Context) {}
+}
 
 enum IngredientVariantMenuMetrics {
     static let width: CGFloat = 160
