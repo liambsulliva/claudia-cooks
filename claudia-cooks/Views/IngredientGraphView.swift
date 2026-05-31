@@ -11,6 +11,7 @@ struct IngredientGraphView: View {
 
     @State private var graph = IngredientGraphData.empty
     @State private var isResolvingCategories = false
+    @State private var highlightedCategory: IngredientCategory?
 
     private var graphRefreshKey: String {
         recipes
@@ -26,31 +27,29 @@ struct IngredientGraphView: View {
             if graph.nodes.isEmpty, !isResolvingCategories {
                 emptyState
             } else if !graph.nodes.isEmpty {
-                InteractiveIngredientGraphCanvas(graph: graph)
-                    .ignoresSafeArea()
+                InteractiveIngredientGraphCanvas(
+                    graph: graph,
+                    highlightedCategory: highlightedCategory
+                )
+                .ignoresSafeArea()
             }
 
             graphHUD
+                .zIndex(1)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task(id: graphRefreshKey) {
             await reloadGraph()
         }
+        .onChange(of: graph.layoutKey) { _, _ in
+            highlightedCategory = nil
+        }
     }
 
     private var graphHUD: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Text(graph.summary)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-
-                if isResolvingCategories {
-                    ProgressView()
-                        .controlSize(.small)
-                }
-            }
+            graphSummaryRow
+                .allowsHitTesting(false)
 
             if !graph.nodes.isEmpty {
                 legend
@@ -59,29 +58,71 @@ struct IngredientGraphView: View {
         .padding(.horizontal, 16)
         .padding(.top, 12)
         .padding(.bottom, 10)
-        .allowsHitTesting(false)
+    }
+
+    private var graphSummaryRow: some View {
+        HStack(spacing: 8) {
+            Text(graph.summary)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            if isResolvingCategories {
+                ProgressView()
+                    .controlSize(.small)
+            }
+        }
     }
 
     private var legend: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 10) {
                 ForEach(graph.visibleCategories) { category in
-                    Label {
-                        Text(category.title)
-                    } icon: {
-                        Circle()
-                            .fill(category.accentColor)
-                            .frame(width: 8, height: 8)
-                    }
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 6)
-                    .background(.quaternary.opacity(0.35), in: Capsule())
+                    categoryLegendBadge(category)
                 }
             }
+            .padding(.vertical, 2)
         }
-        .allowsHitTesting(true)
+    }
+
+    private func categoryLegendBadge(_ category: IngredientCategory) -> some View {
+        let isSelected = highlightedCategory == category
+
+        return Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                highlightedCategory = isSelected ? nil : category
+            }
+        } label: {
+            Label {
+                Text(category.title)
+            } icon: {
+                Circle()
+                    .fill(category.accentColor)
+                    .frame(width: 8, height: 8)
+            }
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(isSelected ? category.accentColor : .secondary)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 6)
+            .background {
+                Capsule()
+                    .fill(
+                        isSelected
+                            ? category.accentColor.opacity(0.22)
+                            : Color.primary.opacity(0.06)
+                    )
+            }
+            .overlay {
+                Capsule()
+                    .strokeBorder(
+                        category.accentColor.opacity(isSelected ? 0.55 : 0),
+                        lineWidth: 1
+                    )
+            }
+        }
+        .buttonStyle(.plain)
+        .contentShape(Capsule())
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     private var emptyState: some View {
@@ -118,6 +159,7 @@ struct IngredientGraphView: View {
 
 private struct InteractiveIngredientGraphCanvas: View {
     let graph: IngredientGraphData
+    let highlightedCategory: IngredientCategory?
 
     @State private var positions: [String: CGPoint] = [:]
     @State private var velocities: [String: CGVector] = [:]
@@ -139,15 +181,17 @@ private struct InteractiveIngredientGraphCanvas: View {
                     ForEach(graph.nodes) { node in
                         let radius = graph.radius(for: node)
                         let center = positions[node.id] ?? CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
+                        let isEmphasized = isNodeEmphasized(node)
 
                         IngredientGraphNodeBubble(
                             node: node,
                             radius: radius,
-                            isDragging: draggingNodeID == node.id
+                            isDragging: draggingNodeID == node.id,
+                            isDimmed: !isEmphasized
                         )
                         .position(center)
                         .gesture(nodeDragGesture(node: node, canvasSize: canvasSize))
-                        .zIndex(draggingNodeID == node.id ? 1 : 0)
+                        .zIndex(nodeZIndex(for: node, isEmphasized: isEmphasized))
                     }
                 }
                 .coordinateSpace(name: "ingredientGraphCanvas")
@@ -173,7 +217,29 @@ private struct InteractiveIngredientGraphCanvas: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    private func isNodeEmphasized(_ node: IngredientGraphNode) -> Bool {
+        guard let highlightedCategory else {
+            return true
+        }
+
+        return node.category == highlightedCategory
+    }
+
+    private func nodeZIndex(for node: IngredientGraphNode, isEmphasized: Bool) -> Double {
+        if draggingNodeID == node.id {
+            return 2
+        }
+
+        if highlightedCategory != nil, isEmphasized {
+            return 1
+        }
+
+        return 0
+    }
+
     private func drawEdges(in context: inout GraphicsContext) {
+        let categoryByNodeID = Dictionary(uniqueKeysWithValues: graph.nodes.map { ($0.id, $0.category) })
+
         for edge in graph.edges {
             guard let source = positions[edge.sourceID], let target = positions[edge.targetID] else {
                 continue
@@ -183,7 +249,14 @@ private struct InteractiveIngredientGraphCanvas: View {
             path.move(to: source)
             path.addLine(to: target)
 
-            let opacity = min(0.16 + CGFloat(edge.recipeCount) * 0.08, 0.58)
+            var opacity = min(0.16 + CGFloat(edge.recipeCount) * 0.08, 0.58)
+
+            if let highlightedCategory {
+                let sourceEmphasized = categoryByNodeID[edge.sourceID] == highlightedCategory
+                let targetEmphasized = categoryByNodeID[edge.targetID] == highlightedCategory
+                opacity *= sourceEmphasized && targetEmphasized ? 1 : 0.12
+            }
+
             context.stroke(
                 path,
                 with: .color(.secondary.opacity(opacity)),
@@ -293,6 +366,13 @@ private struct IngredientGraphNodeBubble: View {
     let node: IngredientGraphNode
     let radius: CGFloat
     let isDragging: Bool
+    var isDimmed = false
+
+    private var fillTopOpacity: Double { isDimmed ? 0.08 : 0.24 }
+    private var fillBottomOpacity: Double { isDimmed ? 0.04 : 0.10 }
+    private var strokeOpacity: Double { isDimmed ? 0.22 : 1 }
+    private var countOpacity: Double { isDimmed ? 0.35 : 1 }
+    private var shadowOpacity: Double { isDimmed ? 0.06 : (isDragging ? 0.35 : 0.18) }
 
     var body: some View {
         ZStack {
@@ -300,8 +380,8 @@ private struct IngredientGraphNodeBubble: View {
                 .fill(
                     LinearGradient(
                         colors: [
-                            node.category.accentColor.opacity(0.24),
-                            node.category.accentColor.opacity(0.10)
+                            node.category.accentColor.opacity(fillTopOpacity),
+                            node.category.accentColor.opacity(fillBottomOpacity)
                         ],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
@@ -309,15 +389,22 @@ private struct IngredientGraphNodeBubble: View {
                 )
 
             Circle()
-                .strokeBorder(node.category.accentColor, lineWidth: isDragging ? 2.5 : 2)
+                .strokeBorder(
+                    node.category.accentColor.opacity(strokeOpacity),
+                    lineWidth: isDragging ? 2.5 : 2
+                )
 
             Text("\(node.occurrenceCount)")
                 .font(.caption.weight(.bold))
-                .foregroundStyle(node.category.accentColor)
+                .foregroundStyle(node.category.accentColor.opacity(countOpacity))
         }
         .frame(width: radius * 2, height: radius * 2)
-        .shadow(color: node.category.accentColor.opacity(isDragging ? 0.35 : 0.18), radius: isDragging ? 10 : 4, y: 2)
-        .scaleEffect(isDragging ? 1.06 : 1)
+        .shadow(
+            color: node.category.accentColor.opacity(shadowOpacity),
+            radius: isDragging ? 10 : 4,
+            y: 2
+        )
+        .scaleEffect(isDragging ? 1.06 : (isDimmed ? 0.94 : 1))
         .overlay(alignment: .top) {
             VStack(spacing: 2) {
                 if let amount = node.amount {
@@ -335,7 +422,11 @@ private struct IngredientGraphNodeBubble: View {
             }
             .frame(maxWidth: radius * 2.8)
             .offset(y: radius * 2 + 6)
+            .opacity(isDimmed ? 0.3 : 1)
         }
+        .opacity(isDimmed ? 0.55 : 1)
+        .saturation(isDimmed ? 0.25 : 1)
+        .animation(.easeInOut(duration: 0.2), value: isDimmed)
         .animation(.spring(response: 0.28, dampingFraction: 0.72), value: isDragging)
     }
 }
