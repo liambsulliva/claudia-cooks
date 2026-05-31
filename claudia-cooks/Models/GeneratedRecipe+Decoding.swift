@@ -6,12 +6,23 @@
 import Foundation
 
 extension GeneratedRecipe {
+    var hasMinimumIngredientsContent: Bool {
+        hasRealTitle && !ingredients.isEmpty
+    }
+
+    var hasMinimumInstructionsContent: Bool {
+        !steps.isEmpty
+    }
+
     var hasMinimumRecipeContent: Bool {
+        hasMinimumIngredientsContent && hasMinimumInstructionsContent
+    }
+
+    private var hasRealTitle: Bool {
         let normalizedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let hasRealTitle = !normalizedTitle.isEmpty
+        return !normalizedTitle.isEmpty
             && normalizedTitle != "generating recipe…"
             && normalizedTitle != "untitled recipe"
-        return hasRealTitle && (!steps.isEmpty || !ingredients.isEmpty)
     }
 
     static func decodePartialAssistantResponse(_ text: String) -> GeneratedRecipe? {

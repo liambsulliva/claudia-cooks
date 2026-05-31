@@ -94,9 +94,7 @@ struct StackedPaperPreview: View {
     @ViewBuilder
     private func paperView(for sheet: PaperSheet, isActive: Bool) -> some View {
         Group {
-            if sheet.isBlank || sheet.markdown == nil {
-                FramedBlankPagePreview(framework: sheet.framework)
-            } else if let markdown = sheet.markdown {
+            if let markdown = sheet.markdown {
                 FramedMarkdownPreview(
                     markdown: markdown,
                     framework: sheet.framework,
@@ -105,6 +103,8 @@ struct StackedPaperPreview: View {
                         onMarkdownChange?(sheet.id, updatedMarkdown)
                     } : nil
                 )
+            } else {
+                FramedBlankPagePreview(framework: sheet.framework)
             }
         }
         .background(.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -127,6 +127,7 @@ struct StackedPaperPreview: View {
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .allowsHitTesting(isActive)
     }
 

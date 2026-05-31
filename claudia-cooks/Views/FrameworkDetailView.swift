@@ -67,7 +67,7 @@ struct FrameworkDetailView: View {
             )
 
             ZStack(alignment: .topTrailing) {
-                centerStageBackdrop(isActive: useCenterStage)
+                Color(nsColor: .windowBackgroundColor)
                     .ignoresSafeArea()
 
                 Group {
@@ -83,7 +83,8 @@ struct FrameworkDetailView: View {
                     case .graph:
                         IngredientGraphView(
                             recipes: libraryStore.recipes,
-                            recipeMarkdown: { libraryStore.recipeMarkdown(for: $0) }
+                            recipeMarkdown: { session.recipeMarkdown(for: $0, libraryStore: libraryStore) },
+                            contentRefreshKey: viewModel.recipeMarkdown
                         )
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .transition(.opacity)
@@ -138,27 +139,6 @@ struct FrameworkDetailView: View {
             )
                 .frame(maxWidth: useCenterStage ? FrameworkBuildScreenLayout.centerStageMaxWidth : .infinity)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background {
-                    if useCenterStage {
-                        RoundedRectangle(
-                            cornerRadius: FrameworkBuildScreenLayout.centerStageCornerRadius,
-                            style: .continuous
-                        )
-                        .fill(Color(nsColor: .windowBackgroundColor))
-                    }
-                }
-                .clipShape(
-                    RoundedRectangle(
-                        cornerRadius: useCenterStage ? FrameworkBuildScreenLayout.centerStageCornerRadius : 0,
-                        style: .continuous
-                    )
-                )
-                .shadow(
-                    color: useCenterStage ? .black.opacity(0.14) : .clear,
-                    radius: useCenterStage ? 20 : 0,
-                    x: 0,
-                    y: useCenterStage ? 10 : 0
-                )
                 .padding(.horizontal, useCenterStage ? FrameworkBuildScreenLayout.centerStageHorizontalInset : 0)
                 .padding(
                     .top,
@@ -169,15 +149,6 @@ struct FrameworkDetailView: View {
             fileSystemSection
                 .frame(height: FrameworkBuildScreenLayout.fileSystemBarHeight)
                 .zIndex(10)
-        }
-    }
-
-    @ViewBuilder
-    private func centerStageBackdrop(isActive: Bool) -> some View {
-        if isActive {
-            Color(nsColor: .textBackgroundColor)
-        } else {
-            Color(nsColor: .windowBackgroundColor)
         }
     }
 
@@ -214,14 +185,11 @@ struct FrameworkDetailView: View {
     private func previewPanel(maxPaperHeight: CGFloat) -> some View {
         StackedPaperPreview(
             sheets: session.paperSheets(
-                selections: viewModel.selections,
                 libraryStore: libraryStore,
                 sessionMarkdown: viewModel.recipeMarkdown
             ),
             selectedSheetID: session.activeSheetID,
-            isGenerating: session.selectedRecipe == nil
-                && !session.isBlankPage(selections: viewModel.selections, libraryStore: libraryStore)
-                && viewModel.isGenerating,
+            isGenerating: session.selectedRecipe == nil && viewModel.isGenerating,
             maxPaperHeight: maxPaperHeight,
             containerWidth: previewPanelWidth,
             onMarkdownChange: { recipeID, markdown in
@@ -268,11 +236,7 @@ struct FrameworkDetailView: View {
                 session.recipeMarkdown(for: recipe, libraryStore: libraryStore)
             },
             isBlank: { recipe in
-                session.isBlankSheet(
-                    recipe,
-                    selections: viewModel.selections,
-                    libraryStore: libraryStore
-                )
+                session.isBlankSheet(recipe, libraryStore: libraryStore)
             },
             fileURL: { recipe in
                 libraryStore.fileURL(for: recipe)

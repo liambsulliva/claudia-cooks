@@ -122,21 +122,28 @@ enum RecipeMarkdownDocument {
             --accent: \(framework.htmlAccentHex);
         }
         * { box-sizing: border-box; }
+        html {
+            -webkit-text-size-adjust: 100%;
+            text-size-adjust: 100%;
+            font-size: 10pt;
+            height: 100%;
+            overflow: hidden;
+        }
         html, body {
             margin: 0;
             padding: 0;
-            overflow-x: hidden;
-            overflow-y: hidden;
             background: #ffffff;
             color: #1d1d1f;
             font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
         }
-        body[data-interactive="true"] {
-            overflow-y: auto;
-        }
         body {
-            padding: 18px 20px 24px;
-            font-size: 12px;
+            box-sizing: border-box;
+            height: 100%;
+            overflow-x: hidden;
+            overflow-y: auto;
+            overscroll-behavior: contain;
+            padding: 14px 16px 18px;
+            font-size: 1rem;
             line-height: 1.45;
             outline: none;
             -webkit-user-select: text;
@@ -146,44 +153,43 @@ enum RecipeMarkdownDocument {
             cursor: text;
         }
         .framework-label {
-            margin: 0 0 18px;
-            font-size: 11px;
+            margin: 0 0 12px;
+            font-size: 0.8rem;
             font-weight: 600;
             letter-spacing: 0.08em;
             color: var(--accent);
         }
         h1.recipe-title {
-            margin: 0 0 12px;
-            font-size: 24px;
+            margin: 0 0 8px;
+            font-size: 1.45rem;
             font-weight: 700;
-            line-height: 1.15;
+            line-height: 1.2;
         }
         h1, h2, h3 {
             margin: 0;
         }
         h2 {
-            margin-top: 16px;
-            margin-bottom: 8px;
-            font-size: 15px;
+            margin-top: 12px;
+            margin-bottom: 6px;
+            font-size: 1.12rem;
             font-weight: 600;
         }
         h3 {
-            margin-top: 12px;
-            margin-bottom: 6px;
-            font-size: 13px;
+            margin-top: 10px;
+            margin-bottom: 4px;
+            font-size: 1.02rem;
             font-weight: 600;
         }
         p {
-            margin: 0 0 10px;
+            margin: 0 0 8px;
             color: #636366;
         }
         ul, ol {
-            margin: 0 0 10px;
-            padding-left: 18px;
+            margin: 0 0 8px;
+            padding-left: 16px;
         }
         li {
-            margin-bottom: 5px;
-            color: #1d1d1f;
+            margin-bottom: 4px;
         }
         li:last-child {
             margin-bottom: 0;

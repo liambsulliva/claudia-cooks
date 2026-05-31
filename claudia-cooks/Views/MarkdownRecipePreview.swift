@@ -28,6 +28,7 @@ struct FramedMarkdownPreview: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipped()
     }
 }
 
@@ -41,15 +42,15 @@ struct MarkdownRecipePreview: NSViewRepresentable {
         Coordinator(onMarkdownChange: onMarkdownChange)
     }
 
-    func makeNSView(context: Context) -> FitToViewWebView {
-        let webView = FitToViewWebView(messageHandler: context.coordinator)
+    func makeNSView(context: Context) -> RecipePreviewWebView {
+        let webView = RecipePreviewWebView(messageHandler: context.coordinator)
         webView.navigationDelegate = context.coordinator
         context.coordinator.webView = webView
         load(into: webView, coordinator: context.coordinator)
         return webView
     }
 
-    func updateNSView(_ webView: FitToViewWebView, context: Context) {
+    func updateNSView(_ webView: RecipePreviewWebView, context: Context) {
         context.coordinator.onMarkdownChange = onMarkdownChange
 
         if context.coordinator.lastMarkdown != markdown
@@ -57,11 +58,20 @@ struct MarkdownRecipePreview: NSViewRepresentable {
             || context.coordinator.lastIsInteractive != isInteractive {
             load(into: webView, coordinator: context.coordinator)
         } else {
-            webView.refitContent()
+            webView.prepareInlineScrolling()
+            webView.syncTypographyToViewport()
         }
     }
 
-    private func load(into webView: FitToViewWebView, coordinator: Coordinator) {
+    static func sizeThatFits(
+        _ proposal: ProposedViewSize,
+        nsView: RecipePreviewWebView,
+        context: Context
+    ) -> CGSize? {
+        proposal.replacingUnspecifiedDimensions(by: .zero)
+    }
+
+    private func load(into webView: RecipePreviewWebView, coordinator: Coordinator) {
         coordinator.lastMarkdown = markdown
         coordinator.lastFramework = framework
         coordinator.lastIsInteractive = isInteractive
@@ -77,7 +87,7 @@ struct MarkdownRecipePreview: NSViewRepresentable {
         var lastMarkdown: String?
         var lastFramework: RecipeFramework?
         var lastIsInteractive = true
-        weak var webView: FitToViewWebView?
+        weak var webView: RecipePreviewWebView?
         var onMarkdownChange: ((String) -> Void)?
 
         init(onMarkdownChange: ((String) -> Void)?) {
@@ -85,7 +95,9 @@ struct MarkdownRecipePreview: NSViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            (webView as? FitToViewWebView)?.refitContent()
+            guard let preview = webView as? RecipePreviewWebView else { return }
+            preview.prepareInlineScrolling()
+            preview.syncTypographyToViewport()
         }
 
         func userContentController(
@@ -103,8 +115,12 @@ struct MarkdownRecipePreview: NSViewRepresentable {
     }
 }
 
-final class FitToViewWebView: WKWebView {
-    private var lastFittedSize: CGSize = .zero
+/// WKWebView that scrolls recipe pages inside the paper frame with viewport-aware type.
+final class RecipePreviewWebView: WKWebView {
+    private static let typographyReferenceWidth: CGFloat = 320
+    private static let minimumRootFontPoints: CGFloat = 9
+    private static let maximumRootFontPoints: CGFloat = 11
+    private static let baseRootFontPoints: CGFloat = 10
 
     init(messageHandler: WKScriptMessageHandler) {
         let configuration = WKWebViewConfiguration()
@@ -119,68 +135,74 @@ final class FitToViewWebView: WKWebView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    private func configure() {
-        setValue(false, forKey: "drawsBackground")
-    }
+    override var acceptsFirstResponder: Bool { true }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func layout() {
         super.layout()
-
-        guard bounds.width > 0, bounds.height > 0 else {
-            return
-        }
-
-        if abs(bounds.width - lastFittedSize.width) > 0.5
-            || abs(bounds.height - lastFittedSize.height) > 0.5 {
-            refitContent()
-        }
+        prepareInlineScrolling()
+        syncTypographyToViewport()
     }
 
-    func refitContent() {
-        guard bounds.width > 0, bounds.height > 0 else {
-            return
+    func prepareInlineScrolling() {
+        configureContentScrollViewIfNeeded()
+    }
+
+    func syncTypographyToViewport() {
+        guard bounds.width > 1 else { return }
+
+        let widthScale = bounds.width / Self.typographyReferenceWidth
+        let clampedScale = min(max(widthScale, Self.minimumRootFontPoints / Self.baseRootFontPoints), Self.maximumRootFontPoints / Self.baseRootFontPoints)
+        let rootFontPoints = Self.baseRootFontPoints * clampedScale
+        let script = "document.documentElement.style.fontSize = '\(rootFontPoints)pt';"
+
+        evaluateJavaScript(script, completionHandler: nil)
+    }
+
+    private func configure() {
+        setValue(false, forKey: "drawsBackground")
+        configureContentScrollViewIfNeeded()
+    }
+
+    private func configureContentScrollViewIfNeeded() {
+        guard let scrollView = contentScrollView else { return }
+
+        // Recipe content scrolls inside the page (`body { overflow-y: auto }`), not via this outer scroll view.
+        scrollView.hasVerticalScroller = false
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.drawsBackground = false
+        scrollView.usesPredominantAxisScrolling = true
+        scrollView.verticalScrollElasticity = .none
+        scrollView.horizontalScrollElasticity = .none
+        scrollView.allowsMagnification = false
+    }
+
+    private var contentScrollView: NSScrollView? {
+        if let enclosingScrollView {
+            return enclosingScrollView
         }
 
-        let fitScript = """
-        (function() {
-            document.body.style.transform = 'none';
-            document.body.style.width = 'auto';
-            var width = Math.max(document.body.scrollWidth, document.documentElement.scrollWidth);
-            var height = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
-            return { width: width, height: height };
-        })();
-        """
+        return findScrollView(in: self)
+    }
 
-        evaluateJavaScript(fitScript) { [weak self] result, _ in
-            guard let self,
-                  let payload = result as? [String: Double],
-                  let contentWidth = payload["width"],
-                  let contentHeight = payload["height"],
-                  contentWidth > 0,
-                  contentHeight > 0 else {
-                return
-            }
+    private func findScrollView(in view: NSView) -> NSScrollView? {
+        if let scrollView = view as? NSScrollView {
+            return scrollView
+        }
 
-            let widthScale = self.bounds.width / contentWidth
-            let heightScale = self.bounds.height / contentHeight
-            let scale = min(widthScale, heightScale, 1)
-            let needsScroll = contentHeight * scale > self.bounds.height - 1
-
-            let applyScript = """
-            (function() {
-                var scale = \(scale);
-                var needsScroll = \(needsScroll);
-                document.body.style.transformOrigin = 'top left';
-                document.body.style.transform = needsScroll ? 'none' : 'scale(' + scale + ')';
-                document.body.style.width = needsScroll ? '100%' : \(contentWidth) + 'px';
-                document.documentElement.style.overflowY = needsScroll ? 'auto' : 'hidden';
-                return scale;
-            })();
-            """
-
-            self.evaluateJavaScript(applyScript) { _, _ in
-                self.lastFittedSize = self.bounds.size
+        for subview in view.subviews {
+            if let scrollView = findScrollView(in: subview) {
+                return scrollView
             }
         }
+
+        return nil
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        configureContentScrollViewIfNeeded()
     }
 }

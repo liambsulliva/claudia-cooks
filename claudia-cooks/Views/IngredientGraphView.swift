@@ -9,6 +9,7 @@ import AppKit
 struct IngredientGraphView: View {
     let recipes: [SavedRecipe]
     var recipeMarkdown: (SavedRecipe) -> String? = { _ in nil }
+    var contentRefreshKey: String = ""
 
     @State private var graph = IngredientGraphData.empty
     @State private var isResolvingCategories = false
@@ -18,6 +19,8 @@ struct IngredientGraphView: View {
         recipes
             .map(\.id.uuidString)
             .joined(separator: "|")
+            + "|"
+            + contentRefreshKey
     }
 
     var body: some View {
@@ -40,6 +43,12 @@ struct IngredientGraphView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task(id: graphRefreshKey) {
+            do {
+                try await Task.sleep(for: .milliseconds(350))
+            } catch {
+                return
+            }
+
             await reloadGraph()
         }
         .onChange(of: graph.layoutKey) { _, _ in

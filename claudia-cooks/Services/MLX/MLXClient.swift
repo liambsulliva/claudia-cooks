@@ -65,7 +65,7 @@ struct MLXClient: Sendable {
     func generateRecipe(
         framework: RecipeFramework,
         selections: RecipeSelections,
-        onPartialResponse: (@Sendable (String) -> Void)? = nil
+        onPartialResponse: (@Sendable (GeneratedRecipe) -> Void)? = nil
     ) async throws -> GeneratedRecipe {
         guard let modelName = await resolvedGenerationModel() else {
             throw MLXClientError.modelNotFound(activeModel)
@@ -77,11 +77,89 @@ struct MLXClient: Sendable {
             progressHandler: nil
         )
 
+        var recipe = GeneratedRecipe(
+            title: "Generating recipe…",
+            summary: "",
+            ingredients: [],
+            steps: [],
+            tips: []
+        )
+
+        let ingredientsResponse = try await streamChatResponse(
+            container: container,
+            instructions: ingredientsSystemPrompt(for: framework),
+            userMessage: ingredientsUserPrompt(framework: framework, selections: selections),
+            maxTokens: 420
+        ) { partialText in
+            guard let partial = GeneratedRecipe.decodePartialAssistantResponse(partialText) else {
+                return
+            }
+
+            recipe.title = partial.title
+            recipe.summary = partial.summary
+            recipe.ingredients = partial.ingredients
+            onPartialResponse?(recipe)
+        }
+
+        guard let ingredientsRecipe = GeneratedRecipe.decodePartialAssistantResponse(ingredientsResponse),
+              ingredientsRecipe.hasMinimumIngredientsContent else {
+            throw MLXClientError.invalidRecipePayload
+        }
+
+        recipe.title = ingredientsRecipe.title
+        recipe.summary = ingredientsRecipe.summary
+        recipe.ingredients = ingredientsRecipe.ingredients
+        onPartialResponse?(recipe)
+
+        let instructionsResponse = try await streamChatResponse(
+            container: container,
+            instructions: instructionsSystemPrompt(for: framework),
+            userMessage: instructionsUserPrompt(
+                framework: framework,
+                selections: selections,
+                ingredients: recipe.ingredients,
+                title: recipe.title,
+                summary: recipe.summary
+            ),
+            maxTokens: 520
+        ) { partialText in
+            guard let partial = GeneratedRecipe.decodePartialAssistantResponse(partialText) else {
+                return
+            }
+
+            recipe.steps = partial.steps
+            recipe.tips = partial.tips
+            onPartialResponse?(recipe)
+        }
+
+        guard let instructionsRecipe = GeneratedRecipe.decodePartialAssistantResponse(instructionsResponse),
+              instructionsRecipe.hasMinimumInstructionsContent else {
+            throw MLXClientError.invalidRecipePayload
+        }
+
+        recipe.steps = instructionsRecipe.steps
+        recipe.tips = instructionsRecipe.tips
+
+        guard recipe.hasMinimumRecipeContent else {
+            throw MLXClientError.invalidRecipePayload
+        }
+
+        onPartialResponse?(recipe)
+        return recipe
+    }
+
+    private func streamChatResponse(
+        container: ModelContainer,
+        instructions: String,
+        userMessage: String,
+        maxTokens: Int,
+        onPartialText: (@Sendable (String) -> Void)? = nil
+    ) async throws -> String {
         let session = ChatSession(
             container,
-            instructions: systemPrompt(for: framework),
+            instructions: instructions,
             generateParameters: GenerateParameters(
-                maxTokens: 700,
+                maxTokens: maxTokens,
                 temperature: 0.1,
                 topP: 0.9,
                 repetitionPenalty: 1.05
@@ -90,19 +168,12 @@ struct MLXClient: Sendable {
         )
 
         var response = ""
-        for try await chunk in session.streamResponse(
-            to: userPrompt(framework: framework, selections: selections)
-        ) {
+        for try await chunk in session.streamResponse(to: userMessage) {
             response += chunk
-            onPartialResponse?(response)
+            onPartialText?(response)
         }
 
-        if let recipe = GeneratedRecipe.decodePartialAssistantResponse(response),
-           recipe.hasMinimumRecipeContent {
-            return recipe
-        }
-
-        throw MLXClientError.invalidRecipePayload
+        return response
     }
 
     func categorizeIngredients(_ ingredientNames: [String]) async throws -> [String: IngredientCategory] {
@@ -265,21 +336,37 @@ struct MLXClient: Sendable {
             .replacingOccurrences(of: "&", with: "and")
     }
 
-    private func systemPrompt(for framework: RecipeFramework) -> String {
+    private func ingredientsSystemPrompt(for framework: RecipeFramework) -> String {
         """
         You are a practical cooking assistant for home cooks.
-        Generate concise \(framework.title.lowercased()) recipes from the user's selections.
+        Generate the ingredient list for a concise \(framework.title.lowercased()) recipe from the user's selections.
         Use only the selected ingredients plus common pantry staples such as salt, pepper, oil, water, and vinegar.
-        Keep steps clear, safe, and realistic. Do not invent unavailable specialty ingredients.
+        Do not invent unavailable specialty ingredients.
         Reply with a single JSON object only. No markdown, no code fences, no commentary, no thinking tags.
-        Required keys: title, summary, ingredients, steps, tips.
-        ingredients, steps, and tips must be JSON arrays of strings.
+        Required keys: title, summary, ingredients.
+        ingredients must be a JSON array of strings with quantities (for example "2 chicken breasts", "1 tbsp olive oil").
         Example shape:
-        {"title":"Garlic Herb Chicken","summary":"A quick skillet dinner.","ingredients":["2 chicken breasts","2 cloves garlic"],"steps":["Season the chicken.","Cook until done."],"tips":["Rest before slicing."]}
+        {"title":"Garlic Herb Chicken","summary":"A quick skillet dinner.","ingredients":["2 chicken breasts","2 cloves garlic","1 tbsp olive oil"]}
         """
     }
 
-    private func userPrompt(framework: RecipeFramework, selections: RecipeSelections) -> String {
+    private func instructionsSystemPrompt(for framework: RecipeFramework) -> String {
+        """
+        You are a practical cooking assistant for home cooks.
+        Write clear, safe, realistic cooking instructions for a \(framework.title.lowercased()) recipe.
+        Use the provided ingredient list exactly; do not add new ingredients beyond common pantry staples already listed.
+        Reply with a single JSON object only. No markdown, no code fences, no commentary, no thinking tags.
+        Required keys: steps, tips.
+        steps and tips must be JSON arrays of strings.
+        Example shape:
+        {"steps":["Season the chicken.","Sear until golden, then finish in the oven."],"tips":["Rest before slicing."]}
+        """
+    }
+
+    private func sharedPromptSections(
+        framework: RecipeFramework,
+        selections: RecipeSelections
+    ) -> (sections: [String], ingredientLines: String, customPrompt: String) {
         let ingredientLines = selections.promptLines(for: framework.applicableCategories)
             .joined(separator: "\n")
         let customPrompt = sanitizePromptText(selections.normalizedCustomPrompt)
@@ -294,20 +381,59 @@ struct MLXClient: Sendable {
             sections.append(sanitizePromptText(ingredientLines))
         }
 
-        let ingredientInstruction = ingredientLines.isEmpty
+        return (sections, ingredientLines, customPrompt)
+    }
+
+    private func ingredientsUserPrompt(framework: RecipeFramework, selections: RecipeSelections) -> String {
+        let context = sharedPromptSections(framework: framework, selections: selections)
+
+        let ingredientInstruction = context.ingredientLines.isEmpty
             ? ""
             : "\nUse only the selected ingredients, plus common pantry staples such as salt, pepper, oil, water, and vinegar."
 
-        let customInstruction = customPrompt.isEmpty
+        let customInstruction = context.customPrompt.isEmpty
             ? ""
             : "\nHonor the user's request while keeping the recipe practical for home cooks."
 
         return sanitizePromptText(
             """
-            \(sections.joined(separator: "\n\n"))
+            \(context.sections.joined(separator: "\n\n"))
 
-            Generate a concise home-cook recipe.\(ingredientInstruction)\(customInstruction)
-            Return one JSON object with keys title, summary, ingredients, steps, and tips.
+            Generate the recipe title, summary, and ingredient list.\(ingredientInstruction)\(customInstruction)
+            Return one JSON object with keys title, summary, and ingredients only.
+            Start with { and end with }. Do not wrap the JSON in markdown.
+            """
+        )
+    }
+
+    private func instructionsUserPrompt(
+        framework: RecipeFramework,
+        selections: RecipeSelections,
+        ingredients: [String],
+        title: String,
+        summary: String
+    ) -> String {
+        let context = sharedPromptSections(framework: framework, selections: selections)
+        let ingredientList = ingredients
+            .map { "- \(sanitizePromptText($0))" }
+            .joined(separator: "\n")
+
+        let customInstruction = context.customPrompt.isEmpty
+            ? ""
+            : "\nHonor the user's request while keeping the steps practical for home cooks."
+
+        return sanitizePromptText(
+            """
+            \(context.sections.joined(separator: "\n\n"))
+
+            Recipe title: \(sanitizePromptText(title))
+            Summary: \(sanitizePromptText(summary))
+
+            Ingredients:
+            \(ingredientList)
+
+            Write numbered-style steps and tips for this recipe.\(customInstruction)
+            Return one JSON object with keys steps and tips only.
             Start with { and end with }. Do not wrap the JSON in markdown.
             """
         )

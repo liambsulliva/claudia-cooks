@@ -41,11 +41,7 @@ final class RecipeBuilderViewModel {
         self.selections = initialSelections
         self.generationService = service
         self.mlxSetup = setup
-        self.recipeMarkdown = initialMarkdown ?? RecipeMarkdownRenderer.renderSelectionPreview(
-            framework: framework,
-            selections: initialSelections,
-            message: nil
-        )
+        self.recipeMarkdown = initialMarkdown ?? ""
         self.lastGeneratedMakeup = hadPersistedGeneratedRecipe
             ? initialSelections.ingredientMakeup
             : nil
@@ -95,7 +91,11 @@ final class RecipeBuilderViewModel {
             ? newSelections.ingredientMakeup
             : nil
 
-        updateSelectionPreview(message: mlxSetup.modelAvailability)
+        if hadPersistedGeneratedRecipe {
+            syncPreviewMessage()
+        } else {
+            recipeMarkdown = ""
+        }
     }
 
     func updateRecipePromptDraft(_ text: String) {
@@ -117,7 +117,30 @@ final class RecipeBuilderViewModel {
 
     private func persistSelectionsAndRefreshPreview() {
         onSelectionsChanged?(selections)
-        updateSelectionPreview(message: mlxSetup.modelAvailability ?? errorMessage)
+
+        if selections.ingredientMakeup.isEmpty {
+            resetPreviewToBlank()
+            return
+        }
+
+        if selections.ingredientMakeup != lastGeneratedMakeup {
+            cancelActiveGeneration()
+            setRecipeMarkdown("")
+        }
+    }
+
+    private func resetPreviewToBlank() {
+        cancelActiveGeneration()
+        lastGeneratedMakeup = nil
+        setRecipeMarkdown("")
+    }
+
+    private func cancelActiveGeneration() {
+        debounceTask?.cancel()
+        makeupDebounceTask?.cancel()
+        generationRequestID += 1
+        isGenerating = false
+        lastStreamRenderInstant = nil
     }
 
     private func scheduleGenerationIfMakeupChanged(debounced: Bool = false) {
@@ -197,7 +220,6 @@ final class RecipeBuilderViewModel {
 
         guard selections.canGenerate else {
             isGenerating = false
-            updateSelectionPreview(message: mlxSetup.modelAvailability)
             return
         }
 
@@ -211,7 +233,6 @@ final class RecipeBuilderViewModel {
 
         if mlxSetup.modelAvailability != nil {
             isGenerating = false
-            updateSelectionPreview(message: mlxSetup.modelAvailability)
             return
         }
 
@@ -222,10 +243,10 @@ final class RecipeBuilderViewModel {
             let recipe = try await generationService.generateRecipe(
                 framework: framework,
                 selections: selections
-            ) { [weak self] partialResponse in
+            ) { [weak self] partialRecipe in
                 Task { @MainActor in
                     self?.renderStreamingPreview(
-                        partialResponse: partialResponse,
+                        partialRecipe: partialRecipe,
                         requestID: requestID,
                         framework: framework
                     )
@@ -251,7 +272,6 @@ final class RecipeBuilderViewModel {
 
             isGenerating = false
             errorMessage = Self.userFacingGenerationError(error)
-            updateSelectionPreview(message: errorMessage)
         }
     }
 
@@ -264,24 +284,12 @@ final class RecipeBuilderViewModel {
         updateRecipeMarkdown(markdown)
     }
 
-    private func updateSelectionPreview(message: String?) {
-        setRecipeMarkdown(
-            RecipeMarkdownRenderer.renderSelectionPreview(
-                framework: framework,
-                selections: selections,
-                message: message
-            )
-        )
-    }
-
     private func syncPreviewMessage() {
-        if let modelAvailability = mlxSetup.modelAvailability {
-            updateSelectionPreview(message: modelAvailability)
-        }
+        errorMessage = mlxSetup.modelAvailability
     }
 
     private func renderStreamingPreview(
-        partialResponse: String,
+        partialRecipe: GeneratedRecipe,
         requestID: Int,
         framework: RecipeFramework
     ) {
@@ -295,10 +303,6 @@ final class RecipeBuilderViewModel {
             return
         }
         lastStreamRenderInstant = now
-
-        guard let partialRecipe = GeneratedRecipe.decodePartialAssistantResponse(partialResponse) else {
-            return
-        }
 
         setRecipeMarkdown(
             RecipeMarkdownRenderer.render(
@@ -319,6 +323,6 @@ final class RecipeBuilderViewModel {
             return description
         }
 
-        return "Recipe generation failed. Showing your current selections instead."
+        return "Recipe generation failed. Try again from the builder panel."
     }
 }

@@ -15,7 +15,6 @@ enum FrameworkBuildScreenLayout {
     static let maxPaperHeightFraction: CGFloat = 0.82
     static let centerStageBreakpoint: CGFloat = 1200
     static let centerStageMaxWidth: CGFloat = 1200
-    static let centerStageCornerRadius: CGFloat = 18
     static let centerStageHorizontalInset: CGFloat = 24
     static let centerStageTopInset: CGFloat = 24
     static let builderPaperSpacing: CGFloat = 32

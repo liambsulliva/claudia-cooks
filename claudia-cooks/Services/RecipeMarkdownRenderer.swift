@@ -24,41 +24,6 @@ enum RecipeMarkdownRenderer {
         }
     }
 
-    static func renderSelectionPreview(
-        framework: RecipeFramework,
-        selections: RecipeSelections,
-        message: String? = nil
-    ) -> String {
-        renderDocument(framework: framework) {
-            var blocks = [
-                htmlTitle("\(framework.title) Builder", framework: framework)
-            ]
-
-            if let message {
-                blocks.append(paragraph(message))
-            }
-
-            if !selections.normalizedCustomPrompt.isEmpty {
-                blocks.append(section("Your Prompt"))
-                blocks.append(paragraph(selections.normalizedCustomPrompt))
-            }
-
-            if selections.isEmpty {
-                blocks.append(section("Start Building"))
-                blocks.append(paragraph("Add a prompt above, pick ingredients, or both to generate a recipe."))
-            } else {
-                blocks.append(section("Preview"))
-                blocks.append(
-                    paragraph(
-                        "When the selected MLX model is downloaded, this pane updates with a generated recipe after each change."
-                    )
-                )
-            }
-
-            return blocks
-        }
-    }
-
     private static func renderDocument(
         framework: RecipeFramework,
         content: () -> [String]
@@ -90,7 +55,7 @@ enum RecipeMarkdownRenderer {
             if let emptyMessage {
                 return paragraph(emptyMessage)
             }
-            return paragraph("No selections yet.")
+            return ""
         }
 
         return items

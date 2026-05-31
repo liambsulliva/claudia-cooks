@@ -30,7 +30,6 @@ final class RecipeSessionController {
     }
 
     func paperSheets(
-        selections: RecipeSelections,
         libraryStore: RecipeLibraryStore,
         sessionMarkdown: String
     ) -> [PaperSheet] {
@@ -45,7 +44,7 @@ final class RecipeSessionController {
             return PaperSheet(
                 id: recipe.id,
                 markdown: markdown,
-                isBlank: isBlankSheet(recipe, selections: selections, libraryStore: libraryStore),
+                isBlank: isBlankSheet(recipe, libraryStore: libraryStore),
                 framework: recipe.framework
             )
         }
@@ -59,35 +58,12 @@ final class RecipeSessionController {
         return libraryStore.recipeMarkdown(for: recipe)
     }
 
-    func isBlankSheet(
-        _ recipe: SavedRecipe,
-        selections: RecipeSelections,
-        libraryStore: RecipeLibraryStore
-    ) -> Bool {
+    func isBlankSheet(_ recipe: SavedRecipe, libraryStore: RecipeLibraryStore) -> Bool {
         if recipe.id == sessionID {
-            return isBlankPage(selections: selections, libraryStore: libraryStore)
+            return liveRecipeMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
 
         return recipe.isBlank
-    }
-
-    func isBlankPage(
-        selections: RecipeSelections,
-        libraryStore: RecipeLibraryStore
-    ) -> Bool {
-        if let selectedRecipe {
-            if selectedRecipe.id == sessionID && !selections.isEmpty {
-                return false
-            }
-
-            return selectedRecipe.isBlank
-        }
-
-        guard selections.isEmpty else {
-            return false
-        }
-
-        return libraryStore.recipe(for: sessionID)?.isBlank ?? true
     }
 
     func ensureBlankSession(

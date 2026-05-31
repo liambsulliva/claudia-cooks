@@ -55,7 +55,7 @@ final class RecipeGenerationService {
     func generateRecipe(
         framework: RecipeFramework,
         selections: RecipeSelections,
-        onPartialResponse: (@Sendable (String) -> Void)? = nil
+        onPartialResponse: (@Sendable (GeneratedRecipe) -> Void)? = nil
     ) async throws -> GeneratedRecipe {
         if lastAvailability == nil {
             _ = await refreshAvailability()

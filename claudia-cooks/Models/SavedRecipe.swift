@@ -13,6 +13,5 @@ struct SavedRecipe: Identifiable, Codable, Hashable {
     var updatedAt: Date
     var fileName: String
     var isBlank: Bool = false
-    var clickedBadgeIDs: Set<String> = []
     var selections: StoredRecipeSelections = StoredRecipeSelections()
 }
