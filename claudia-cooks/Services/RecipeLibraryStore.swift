@@ -124,13 +124,11 @@ final class RecipeLibraryStore {
             try recipeMarkdown.write(to: fileURL, atomically: true, encoding: .utf8)
 
             if let existingIndex = recipes.firstIndex(where: { $0.id == sessionID }) {
-                let clickedBadgeIDs = recipes[existingIndex].clickedBadgeIDs
                 recipes[existingIndex].title = title
                 recipes[existingIndex].framework = framework
                 recipes[existingIndex].updatedAt = now
                 recipes[existingIndex].fileName = fileName
                 recipes[existingIndex].isBlank = false
-                recipes[existingIndex].clickedBadgeIDs = clickedBadgeIDs
                 recipes[existingIndex].selections = selections.stored
             } else {
                 recipes.append(
@@ -176,21 +174,6 @@ final class RecipeLibraryStore {
             errorMessage = nil
         } catch {
             errorMessage = "Recipe library could not delete this file."
-        }
-    }
-
-    func setClickedBadgeIDs(_ badgeIDs: Set<String>, for recipeID: UUID) {
-        guard let index = recipes.firstIndex(where: { $0.id == recipeID }) else {
-            return
-        }
-
-        recipes[index].clickedBadgeIDs = badgeIDs
-
-        do {
-            try persistManifest()
-            errorMessage = nil
-        } catch {
-            errorMessage = "Recipe library could not save badge state."
         }
     }
 

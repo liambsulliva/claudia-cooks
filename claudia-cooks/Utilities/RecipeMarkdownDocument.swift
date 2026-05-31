@@ -9,13 +9,9 @@ enum RecipeMarkdownDocument {
     static func html(
         markdown: String,
         framework: RecipeFramework,
-        clickedBadgeIDs: Set<String> = [],
         isInteractive: Bool = true
     ) -> String {
-        let body = applyClickedBadgeState(
-            to: MarkdownToHTML.convert(markdown),
-            clickedBadgeIDs: clickedBadgeIDs
-        )
+        let body = MarkdownToHTML.convert(markdown)
         return """
         <!DOCTYPE html>
         <html lang="en">
@@ -33,62 +29,10 @@ enum RecipeMarkdownDocument {
         >
         \(body)
         <script>
-        \(badgeScript)
         \(editScript(framework: framework))
         </script>
         </body>
         </html>
-        """
-    }
-
-    private static func applyClickedBadgeState(to html: String, clickedBadgeIDs: Set<String>) -> String {
-        guard !clickedBadgeIDs.isEmpty else {
-            return html
-        }
-
-        var updated = html
-        for badgeID in clickedBadgeIDs {
-            let escapedID = MarkdownToHTML.escapeHTML(badgeID)
-            updated = updated.replacingOccurrences(
-                of: "data-badge-row-id=\"\(escapedID)\"",
-                with: "data-badge-row-id=\"\(escapedID)\" data-clicked=\"true\""
-            )
-            updated = updated.replacingOccurrences(
-                of: "data-badge-id=\"\(escapedID)\" aria-pressed=\"false\"",
-                with: "data-badge-id=\"\(escapedID)\" aria-pressed=\"true\""
-            )
-        }
-        return updated
-    }
-
-    private static var badgeScript: String {
-        """
-        (function() {
-            if (document.body.dataset.interactive !== 'true') {
-                return;
-            }
-
-            function postToggle(button) {
-                var id = button.dataset.badgeId;
-                if (!id) {
-                    return;
-                }
-                var isClicked = button.getAttribute('aria-pressed') === 'true';
-                window.webkit.messageHandlers.badgeClick.postMessage({
-                    id: id,
-                    isClicked: !isClicked
-                });
-            }
-
-            document.querySelectorAll('.recipe-badge').forEach(function(button) {
-                button.contentEditable = 'false';
-                button.addEventListener('click', function(event) {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    postToggle(button);
-                });
-            });
-        })();
         """
     }
 
@@ -110,8 +54,7 @@ enum RecipeMarkdownDocument {
             }
 
             function listItemText(item) {
-                var badgeText = item.querySelector('.badge-text');
-                return cleanText((badgeText || item).innerText || item.textContent || '');
+                return cleanText(item.innerText || item.textContent || '');
             }
 
             function serializeList(list) {
@@ -182,10 +125,14 @@ enum RecipeMarkdownDocument {
         html, body {
             margin: 0;
             padding: 0;
-            overflow: hidden;
+            overflow-x: hidden;
+            overflow-y: hidden;
             background: #ffffff;
             color: #1d1d1f;
             font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+        }
+        body[data-interactive="true"] {
+            overflow-y: auto;
         }
         body {
             padding: 18px 20px 24px;
@@ -234,50 +181,9 @@ enum RecipeMarkdownDocument {
             margin: 0 0 10px;
             padding-left: 18px;
         }
-        ul.badge-list {
-            list-style: none;
-            padding: 0;
-            margin: 0 0 10px;
-        }
-        li.badge-row {
-            display: flex;
-            align-items: flex-start;
-            gap: 8px;
-            margin-bottom: 6px;
-        }
-        li.badge-row:last-child {
-            margin-bottom: 0;
-        }
-        li.badge-row[data-clicked="true"] .badge-text {
-            color: #8e8e93;
-            text-decoration: line-through;
-        }
-        button.recipe-badge {
-            flex: 0 0 auto;
-            margin-top: 1px;
-            padding: 2px 8px;
-            border-radius: 999px;
-            border: 1px solid color-mix(in srgb, var(--accent) 35%, #d1d1d6);
-            background: #f5f5f7;
-            color: var(--accent);
-            font-size: 10px;
-            font-weight: 600;
-            line-height: 1.2;
-            cursor: pointer;
-            -webkit-user-select: none;
-            user-select: none;
-        }
-        button.recipe-badge[aria-pressed="true"] {
-            background: var(--accent);
-            border-color: var(--accent);
-            color: #ffffff;
-        }
-        span.badge-text {
-            flex: 1 1 auto;
-            color: #1d1d1f;
-        }
         li {
             margin-bottom: 5px;
+            color: #1d1d1f;
         }
         li:last-child {
             margin-bottom: 0;

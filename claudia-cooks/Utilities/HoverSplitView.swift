@@ -17,8 +17,10 @@ struct HoverSplitView<Leading: View, Trailing: View>: View {
     private let minLeadingWidth: CGFloat
     private let maxLeadingWidth: CGFloat
     private let minTrailingWidth: CGFloat
-    private let dividerHitWidth: CGFloat = 6
+    private let dividerHitWidth: CGFloat = FrameworkBuildScreenLayout.splitDividerHitWidth
     private let dividerLineWidth: CGFloat = 3
+    private let strategicLeadingWidth: ((CGFloat, CGFloat) -> CGFloat)?
+    private let strategicLayoutDependency: Int
 
     @ViewBuilder private let leading: () -> Leading
     @ViewBuilder private let trailing: () -> Trailing
@@ -30,6 +32,8 @@ struct HoverSplitView<Leading: View, Trailing: View>: View {
         minLeadingWidth: CGFloat = 360,
         maxLeadingWidth: CGFloat = .infinity,
         minTrailingWidth: CGFloat = 280,
+        strategicLeadingWidth: ((CGFloat, CGFloat) -> CGFloat)? = nil,
+        strategicLayoutDependency: Int = 0,
         @ViewBuilder leading: @escaping () -> Leading,
         @ViewBuilder trailing: @escaping () -> Trailing
     ) {
@@ -39,6 +43,8 @@ struct HoverSplitView<Leading: View, Trailing: View>: View {
         self.minLeadingWidth = minLeadingWidth
         self.maxLeadingWidth = maxLeadingWidth
         self.minTrailingWidth = minTrailingWidth
+        self.strategicLeadingWidth = strategicLeadingWidth
+        self.strategicLayoutDependency = strategicLayoutDependency
         self.leading = leading
         self.trailing = trailing
     }
@@ -64,14 +70,44 @@ struct HoverSplitView<Leading: View, Trailing: View>: View {
                     .frame(width: resolvedTrailingWidth)
             }
             .onAppear {
-                trailingWidth = resolvedTrailingWidth
+                applyStrategicOrSyncedLayout(
+                    totalWidth: geometry.size.width,
+                    totalHeight: geometry.size.height
+                )
             }
             .onChange(of: resolvedTrailingWidth) { _, newWidth in
                 applyTrailingWidth(newWidth)
             }
-            .onChange(of: geometry.size.width) { _, totalWidth in
-                syncWidthsForContainer(totalWidth: totalWidth)
+            .onChange(of: geometry.size.width) { _, _ in
+                applyStrategicOrSyncedLayout(
+                    totalWidth: geometry.size.width,
+                    totalHeight: geometry.size.height
+                )
             }
+            .onChange(of: geometry.size.height) { _, _ in
+                applyStrategicOrSyncedLayout(
+                    totalWidth: geometry.size.width,
+                    totalHeight: geometry.size.height
+                )
+            }
+            .onChange(of: strategicLayoutDependency) { _, _ in
+                applyStrategicOrSyncedLayout(
+                    totalWidth: geometry.size.width,
+                    totalHeight: geometry.size.height
+                )
+            }
+        }
+    }
+
+    private func applyStrategicOrSyncedLayout(totalWidth: CGFloat, totalHeight: CGFloat) {
+        guard !isDragging else {
+            return
+        }
+
+        if let strategicLeadingWidth {
+            applyLeadingWidth(strategicLeadingWidth(totalWidth, totalHeight), totalWidth: totalWidth)
+        } else {
+            syncWidthsForContainer(totalWidth: totalWidth)
         }
     }
 

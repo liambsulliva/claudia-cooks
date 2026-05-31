@@ -8,7 +8,6 @@ import SwiftUI
 struct PaperSheet: Identifiable, Equatable {
     let id: UUID
     let markdown: String?
-    let clickedBadgeIDs: Set<String>
     let isBlank: Bool
     let framework: RecipeFramework
 }
@@ -18,8 +17,9 @@ struct StackedPaperPreview: View {
     let selectedSheetID: UUID
     let isGenerating: Bool
     let maxPaperHeight: CGFloat
+    var menuOverlap: CGFloat = FrameworkBuildScreenLayout.paperOverlapIntoBar
+    var topInset: CGFloat = FrameworkBuildScreenLayout.paperStackTopInset
     var containerWidth: CGFloat?
-    var onBadgeToggle: ((String, Bool) -> Void)?
     var onMarkdownChange: ((UUID, String) -> Void)?
 
     @State private var hasRaisedStack = false
@@ -74,8 +74,9 @@ struct StackedPaperPreview: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+            .padding(.top, topInset)
+            .padding(.bottom, menuOverlap)
             .padding(.trailing, trailingPadding)
-            .clipped()
             .padding(.bottom, hasRaisedStack ? 0 : -140)
             .animation(nil, value: layout.width)
             .animation(nil, value: layout.height)
@@ -99,9 +100,7 @@ struct StackedPaperPreview: View {
                 FramedMarkdownPreview(
                     markdown: markdown,
                     framework: sheet.framework,
-                    clickedBadgeIDs: sheet.clickedBadgeIDs,
                     isInteractive: isActive && !isGenerating,
-                    onBadgeToggle: isActive && !isGenerating ? onBadgeToggle : nil,
                     onMarkdownChange: isActive && !isGenerating ? { updatedMarkdown in
                         onMarkdownChange?(sheet.id, updatedMarkdown)
                     } : nil
@@ -150,7 +149,8 @@ struct StackedPaperPreview: View {
     private func paperLayout(in containerSize: CGSize) -> (width: CGFloat, height: CGFloat) {
         let clampedWidth = min(containerSize.width, containerWidth ?? containerSize.width)
         let availableWidth = max(clampedWidth - trailingPadding, 1)
-        let availableHeight = max(containerSize.height * 0.95, 1)
+        let reservedVerticalSpace = topInset + menuOverlap + 8
+        let availableHeight = max(containerSize.height - reservedVerticalSpace, 1)
 
         let naturalHeight = min(maxPaperHeight, availableHeight)
         let naturalWidth = naturalHeight * 0.77
@@ -187,9 +187,9 @@ struct StackedPaperPreview: View {
 
     StackedPaperPreview(
         sheets: [
-            PaperSheet(id: UUID(), markdown: nil, clickedBadgeIDs: [], isBlank: true, framework: .bowl),
-            PaperSheet(id: UUID(), markdown: nil, clickedBadgeIDs: [], isBlank: true, framework: .soup),
-            PaperSheet(id: selectedID, markdown: nil, clickedBadgeIDs: [], isBlank: true, framework: .sandwich)
+            PaperSheet(id: UUID(), markdown: nil, isBlank: true, framework: .bowl),
+            PaperSheet(id: UUID(), markdown: nil, isBlank: true, framework: .soup),
+            PaperSheet(id: selectedID, markdown: nil, isBlank: true, framework: .sandwich)
         ],
         selectedSheetID: selectedID,
         isGenerating: true,

@@ -160,7 +160,6 @@ struct FileSystemSection: View {
             MarkdownThumbnailView(
                 markdown: recipeMarkdown(recipe),
                 framework: recipe.framework,
-                clickedBadgeIDs: recipe.clickedBadgeIDs,
                 isBlank: isBlank(recipe)
             )
             .frame(width: 56, height: 74)
@@ -252,7 +251,6 @@ struct FileSystemSection: View {
 private struct MarkdownThumbnailView: View {
     let markdown: String?
     let framework: RecipeFramework
-    var clickedBadgeIDs: Set<String> = []
     var isBlank: Bool = false
 
     var body: some View {
@@ -263,7 +261,6 @@ private struct MarkdownThumbnailView: View {
                 MarkdownRecipePreview(
                     markdown: markdown,
                     framework: framework,
-                    clickedBadgeIDs: clickedBadgeIDs,
                     isInteractive: false
                 )
                 .allowsHitTesting(false)

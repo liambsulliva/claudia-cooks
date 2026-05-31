@@ -16,28 +16,13 @@ enum RecipeMarkdownRenderer {
                 htmlTitle(recipe.title, framework: framework),
                 paragraph(recipe.summary),
                 section("Selected Ingredients"),
-                badgeList(
-                    selectionLines(framework: framework, selections: selections),
-                    badgeID: RecipeBadgeID.selection
-                ),
+                bullets(selectionLines(framework: framework, selections: selections)),
                 section("Ingredients"),
-                badgeList(
-                    recipe.ingredients,
-                    badgeID: RecipeBadgeID.ingredient,
-                    emptyMessage: "No ingredients generated yet."
-                ),
+                bullets(recipe.ingredients, emptyMessage: "No ingredients generated yet."),
                 section("Steps"),
-                badgeList(
-                    recipe.steps,
-                    badgeID: RecipeBadgeID.step,
-                    emptyMessage: "No steps generated yet."
-                ),
+                numbered(recipe.steps, emptyMessage: "No steps generated yet."),
                 section("Tips"),
-                badgeList(
-                    recipe.tips,
-                    badgeID: RecipeBadgeID.tip,
-                    emptyMessage: "No tips generated yet."
-                )
+                bullets(recipe.tips, emptyMessage: "No tips generated yet.")
             ]
         }
     }
@@ -66,12 +51,7 @@ enum RecipeMarkdownRenderer {
                 blocks.append(paragraph("Add a prompt above, pick ingredients, or both to generate a recipe."))
             } else {
                 blocks.append(section("Selected Ingredients"))
-                blocks.append(
-                    badgeList(
-                        selectionLines(framework: framework, selections: selections),
-                        badgeID: RecipeBadgeID.selection
-                    )
-                )
+                blocks.append(bullets(selectionLines(framework: framework, selections: selections)))
                 blocks.append(section("Preview"))
                 blocks.append(
                     paragraph(
@@ -110,11 +90,7 @@ enum RecipeMarkdownRenderer {
         MarkdownToHTML.escapeMarkdown(text)
     }
 
-    private static func badgeList(
-        _ items: [String],
-        badgeID: (Int) -> String,
-        emptyMessage: String? = nil
-    ) -> String {
+    private static func bullets(_ items: [String], emptyMessage: String? = nil) -> String {
         guard !items.isEmpty else {
             if let emptyMessage {
                 return paragraph(emptyMessage)
@@ -122,24 +98,21 @@ enum RecipeMarkdownRenderer {
             return paragraph("No selections yet.")
         }
 
-        let rows = items.enumerated()
-            .map { index, item in
-                badgeRow(id: badgeID(index), text: item)
-            }
+        return items
+            .map { "- \(MarkdownToHTML.escapeMarkdown($0))" }
             .joined(separator: "\n")
-
-        return "<ul class=\"badge-list\">\n\(rows)\n</ul>"
     }
 
-    private static func badgeRow(id: String, text: String) -> String {
-        let escapedID = MarkdownToHTML.escapeHTML(id)
-        let escapedText = MarkdownToHTML.escapeHTML(text)
-        return """
-        <li class="badge-row" data-badge-row-id="\(escapedID)">
-          <button type="button" class="recipe-badge" data-badge-id="\(escapedID)" aria-pressed="false">Save</button>
-          <span class="badge-text">\(escapedText)</span>
-        </li>
-        """
+    private static func numbered(_ items: [String], emptyMessage: String) -> String {
+        guard !items.isEmpty else {
+            return paragraph(emptyMessage)
+        }
+
+        return items.enumerated()
+            .map { index, item in
+                "\(index + 1). \(MarkdownToHTML.escapeMarkdown(item))"
+            }
+            .joined(separator: "\n")
     }
 
     private static func selectionLines(

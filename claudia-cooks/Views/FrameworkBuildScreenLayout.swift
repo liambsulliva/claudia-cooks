@@ -7,8 +7,10 @@ import SwiftUI
 
 enum FrameworkBuildScreenLayout {
     static let fileSystemBarHeight: CGFloat = 160
-    static let paperOverlapIntoBar: CGFloat = 108
-    static let maxPaperHeightFraction: CGFloat = 0.75
+    /// How far the front paper dips into the file-system bar (keep small).
+    static let paperOverlapIntoBar: CGFloat = 20
+    static let paperStackTopInset: CGFloat = 12
+    static let maxPaperHeightFraction: CGFloat = 0.82
     static let centerStageBreakpoint: CGFloat = 1200
     static let centerStageMaxWidth: CGFloat = 1200
     static let centerStageCornerRadius: CGFloat = 18
@@ -20,4 +22,40 @@ enum FrameworkBuildScreenLayout {
     static let minBuilderPanelWidth: CGFloat = 500
     static let defaultPreviewPanelWidth: CGFloat = 520
     static let paperStackTrailingMargin: CGFloat = 24
+    static let paperAspectRatio: CGFloat = 0.77
+    static let paperStackInternalTrailingPadding: CGFloat = 42
+    static let maxPaperStackDepth: Int = 7
+    static let paperStackDepthOffset: CGFloat = 18
+    static let splitDividerHitWidth: CGFloat = 6
+    static let minPreviewPanelWidth: CGFloat = 300
+
+    /// Leading builder width that gives the paper preview enough room at the current window size.
+    static func strategicLeadingWidth(
+        totalWidth: CGFloat,
+        availablePaperHeight: CGFloat,
+        maxPaperHeight: CGFloat,
+        sheetCount: Int,
+        minLeadingWidth: CGFloat = minBuilderPanelWidth,
+        maxLeadingWidth: CGFloat = maxBuilderPanelWidth,
+        minTrailingWidth: CGFloat = minPreviewPanelWidth
+    ) -> CGFloat {
+        let reservedVerticalSpace = paperStackTopInset + paperOverlapIntoBar + 8
+        let previewHeight = max(availablePaperHeight - reservedVerticalSpace, 1)
+        let naturalPaperHeight = min(max(maxPaperHeight, 180), previewHeight)
+        let naturalPaperWidth = naturalPaperHeight * paperAspectRatio
+        let stackOverhang = CGFloat(min(max(sheetCount - 1, 0), maxPaperStackDepth)) * paperStackDepthOffset
+        let idealTrailingWidth = naturalPaperWidth
+            + stackOverhang
+            + paperStackInternalTrailingPadding
+            + paperStackTrailingMargin
+
+        let dividerReserve = splitDividerHitWidth + builderPaperSpacing
+        let maxTrailing = max(totalWidth - minLeadingWidth - dividerReserve, minTrailingWidth)
+        let trailingWidth = min(max(idealTrailingWidth, minTrailingWidth), maxTrailing)
+
+        var leadingWidth = totalWidth - trailingWidth - dividerReserve
+        leadingWidth = min(max(leadingWidth, minLeadingWidth), maxLeadingWidth)
+
+        return leadingWidth
+    }
 }

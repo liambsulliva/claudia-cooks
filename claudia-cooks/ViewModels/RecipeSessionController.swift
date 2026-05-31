@@ -14,7 +14,6 @@ final class RecipeSessionController {
 
     var selectedRecipe: SavedRecipe?
     var liveRecipeMarkdown: String
-    var liveClickedBadgeIDs: Set<String> = []
 
     var activeSheetID: UUID {
         selectedRecipe?.id ?? sessionID
@@ -46,7 +45,6 @@ final class RecipeSessionController {
             return PaperSheet(
                 id: recipe.id,
                 markdown: markdown,
-                clickedBadgeIDs: clickedBadgeIDs(for: recipe, libraryStore: libraryStore),
                 isBlank: isBlankSheet(recipe, selections: selections, libraryStore: libraryStore),
                 framework: recipe.framework
             )
@@ -59,39 +57,6 @@ final class RecipeSessionController {
         }
 
         return libraryStore.recipeMarkdown(for: recipe)
-    }
-
-    func clickedBadgeIDs(for recipe: SavedRecipe, libraryStore: RecipeLibraryStore) -> Set<String> {
-        if recipe.id == sessionID {
-            return liveClickedBadgeIDs
-        }
-
-        return libraryStore.recipe(for: recipe.id)?.clickedBadgeIDs ?? recipe.clickedBadgeIDs
-    }
-
-    func toggleBadge(_ badgeID: String, isClicked: Bool, libraryStore: RecipeLibraryStore) {
-        let recipeID = activeSheetID
-        var badgeIDs = clickedBadgeIDs(forRecipeID: recipeID, libraryStore: libraryStore)
-
-        if isClicked {
-            badgeIDs.insert(badgeID)
-        } else {
-            badgeIDs.remove(badgeID)
-        }
-
-        if recipeID == sessionID {
-            liveClickedBadgeIDs = badgeIDs
-        }
-
-        libraryStore.setClickedBadgeIDs(badgeIDs, for: recipeID)
-    }
-
-    private func clickedBadgeIDs(forRecipeID recipeID: UUID, libraryStore: RecipeLibraryStore) -> Set<String> {
-        if recipeID == sessionID {
-            return liveClickedBadgeIDs
-        }
-
-        return libraryStore.recipe(for: recipeID)?.clickedBadgeIDs ?? []
     }
 
     func isBlankSheet(
@@ -136,10 +101,6 @@ final class RecipeSessionController {
         )
     }
 
-    func loadPersistedBadgeState(libraryStore: RecipeLibraryStore) {
-        liveClickedBadgeIDs = libraryStore.recipe(for: sessionID)?.clickedBadgeIDs ?? []
-    }
-
     func upsertGeneratedRecipe(
         _ recipe: GeneratedRecipe,
         recipeMarkdown: String,
@@ -153,7 +114,6 @@ final class RecipeSessionController {
             recipeMarkdown: recipeMarkdown,
             selections: selections
         )
-        libraryStore.setClickedBadgeIDs(liveClickedBadgeIDs, for: sessionID)
     }
 
     func deleteRecipe(_ recipe: SavedRecipe, libraryStore: RecipeLibraryStore) {
@@ -164,7 +124,6 @@ final class RecipeSessionController {
         }
 
         if recipe.id == sessionID {
-            liveClickedBadgeIDs = []
             ensureBlankSession(libraryStore: libraryStore)
         }
     }

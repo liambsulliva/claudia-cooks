@@ -55,9 +55,14 @@ struct FrameworkDetailView: View {
         GeometryReader { windowGeometry in
             let useCenterStage = windowGeometry.size.width > FrameworkBuildScreenLayout.centerStageBreakpoint
             let availablePreviewHeight = windowGeometry.size.height - FrameworkBuildScreenLayout.fileSystemBarHeight
-            let maxPaperHeight = min(
-                windowGeometry.size.height * FrameworkBuildScreenLayout.maxPaperHeightFraction,
-                availablePreviewHeight * 0.92
+            let maxPaperHeight = max(
+                min(
+                    windowGeometry.size.height * FrameworkBuildScreenLayout.maxPaperHeightFraction,
+                    availablePreviewHeight
+                        - FrameworkBuildScreenLayout.paperStackTopInset
+                        - FrameworkBuildScreenLayout.paperOverlapIntoBar
+                ),
+                180
             )
 
             ZStack {
@@ -65,7 +70,10 @@ struct FrameworkDetailView: View {
                     .ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    buildScreen(maxPaperHeight: maxPaperHeight)
+                    buildScreen(
+                        maxPaperHeight: maxPaperHeight,
+                        availablePaperHeight: availablePreviewHeight
+                    )
                         .frame(maxWidth: useCenterStage ? FrameworkBuildScreenLayout.centerStageMaxWidth : .infinity)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .background {
@@ -132,13 +140,25 @@ struct FrameworkDetailView: View {
         }
     }
 
-    private func buildScreen(maxPaperHeight: CGFloat) -> some View {
-        HoverSplitView(
+    private func buildScreen(maxPaperHeight: CGFloat, availablePaperHeight: CGFloat) -> some View {
+        let sheetCount = libraryStore.recipes.count
+
+        return HoverSplitView(
             leadingWidth: $builderPanelWidth,
             trailingWidth: $previewPanelWidth,
             panelSpacing: FrameworkBuildScreenLayout.builderPaperSpacing,
             minLeadingWidth: FrameworkBuildScreenLayout.minBuilderPanelWidth,
-            maxLeadingWidth: FrameworkBuildScreenLayout.maxBuilderPanelWidth
+            maxLeadingWidth: FrameworkBuildScreenLayout.maxBuilderPanelWidth,
+            minTrailingWidth: FrameworkBuildScreenLayout.minPreviewPanelWidth,
+            strategicLeadingWidth: { totalWidth, totalHeight in
+                FrameworkBuildScreenLayout.strategicLeadingWidth(
+                    totalWidth: totalWidth,
+                    availablePaperHeight: totalHeight,
+                    maxPaperHeight: maxPaperHeight,
+                    sheetCount: sheetCount
+                )
+            },
+            strategicLayoutDependency: sheetCount
         ) {
             FrameworkBuilderPanel(framework: framework, viewModel: viewModel)
         } trailing: {
@@ -163,9 +183,6 @@ struct FrameworkDetailView: View {
                 && viewModel.isGenerating,
             maxPaperHeight: maxPaperHeight,
             containerWidth: previewPanelWidth,
-            onBadgeToggle: { badgeID, isClicked in
-                session.toggleBadge(badgeID, isClicked: isClicked, libraryStore: libraryStore)
-            },
             onMarkdownChange: { recipeID, markdown in
                 updateMarkdown(markdown, for: recipeID)
             }
@@ -242,7 +259,6 @@ struct FrameworkDetailView: View {
             libraryStore: libraryStore,
             selections: viewModel.selections
         )
-        session.loadPersistedBadgeState(libraryStore: libraryStore)
         session.liveRecipeMarkdown = viewModel.recipeMarkdown
 
         viewModel.onRecipeMarkdownChanged = { markdown in

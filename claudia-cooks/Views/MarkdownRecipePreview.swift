@@ -10,18 +10,14 @@ import WebKit
 struct FramedMarkdownPreview: View {
     let markdown: String
     let framework: RecipeFramework
-    var clickedBadgeIDs: Set<String> = []
     var isInteractive: Bool = true
-    var onBadgeToggle: ((String, Bool) -> Void)?
     var onMarkdownChange: ((String) -> Void)?
 
     var body: some View {
         MarkdownRecipePreview(
             markdown: markdown,
             framework: framework,
-            clickedBadgeIDs: clickedBadgeIDs,
             isInteractive: isInteractive,
-            onBadgeToggle: onBadgeToggle,
             onMarkdownChange: onMarkdownChange
         )
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
@@ -38,13 +34,11 @@ struct FramedMarkdownPreview: View {
 struct MarkdownRecipePreview: NSViewRepresentable {
     let markdown: String
     let framework: RecipeFramework
-    var clickedBadgeIDs: Set<String> = []
     var isInteractive: Bool = true
-    var onBadgeToggle: ((String, Bool) -> Void)?
     var onMarkdownChange: ((String) -> Void)?
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onBadgeToggle: onBadgeToggle, onMarkdownChange: onMarkdownChange)
+        Coordinator(onMarkdownChange: onMarkdownChange)
     }
 
     func makeNSView(context: Context) -> FitToViewWebView {
@@ -56,12 +50,10 @@ struct MarkdownRecipePreview: NSViewRepresentable {
     }
 
     func updateNSView(_ webView: FitToViewWebView, context: Context) {
-        context.coordinator.onBadgeToggle = onBadgeToggle
         context.coordinator.onMarkdownChange = onMarkdownChange
 
         if context.coordinator.lastMarkdown != markdown
             || context.coordinator.lastFramework != framework
-            || context.coordinator.lastClickedBadgeIDs != clickedBadgeIDs
             || context.coordinator.lastIsInteractive != isInteractive {
             load(into: webView, coordinator: context.coordinator)
         } else {
@@ -72,12 +64,10 @@ struct MarkdownRecipePreview: NSViewRepresentable {
     private func load(into webView: FitToViewWebView, coordinator: Coordinator) {
         coordinator.lastMarkdown = markdown
         coordinator.lastFramework = framework
-        coordinator.lastClickedBadgeIDs = clickedBadgeIDs
         coordinator.lastIsInteractive = isInteractive
         let html = RecipeMarkdownDocument.html(
             markdown: markdown,
             framework: framework,
-            clickedBadgeIDs: clickedBadgeIDs,
             isInteractive: isInteractive
         )
         webView.loadHTMLString(html, baseURL: nil)
@@ -86,17 +76,11 @@ struct MarkdownRecipePreview: NSViewRepresentable {
     final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         var lastMarkdown: String?
         var lastFramework: RecipeFramework?
-        var lastClickedBadgeIDs: Set<String> = []
         var lastIsInteractive = true
         weak var webView: FitToViewWebView?
-        var onBadgeToggle: ((String, Bool) -> Void)?
         var onMarkdownChange: ((String) -> Void)?
 
-        init(
-            onBadgeToggle: ((String, Bool) -> Void)?,
-            onMarkdownChange: ((String) -> Void)?
-        ) {
-            self.onBadgeToggle = onBadgeToggle
+        init(onMarkdownChange: ((String) -> Void)?) {
             self.onMarkdownChange = onMarkdownChange
         }
 
@@ -108,27 +92,13 @@ struct MarkdownRecipePreview: NSViewRepresentable {
             _ userContentController: WKUserContentController,
             didReceive message: WKScriptMessage
         ) {
-            switch message.name {
-            case "badgeClick":
-                guard let payload = message.body as? [String: Any],
-                      let badgeID = payload["id"] as? String,
-                      let isClicked = payload["isClicked"] as? Bool else {
-                    return
-                }
-
-                onBadgeToggle?(badgeID, isClicked)
-
-            case "markdownChange":
-                guard let markdown = message.body as? String else {
-                    return
-                }
-
-                lastMarkdown = markdown
-                onMarkdownChange?(markdown)
-
-            default:
+            guard message.name == "markdownChange",
+                  let markdown = message.body as? String else {
                 return
             }
+
+            lastMarkdown = markdown
+            onMarkdownChange?(markdown)
         }
     }
 }
@@ -139,7 +109,6 @@ final class FitToViewWebView: WKWebView {
     init(messageHandler: WKScriptMessageHandler) {
         let configuration = WKWebViewConfiguration()
         configuration.suppressesIncrementalRendering = true
-        configuration.userContentController.add(messageHandler, name: "badgeClick")
         configuration.userContentController.add(messageHandler, name: "markdownChange")
         super.init(frame: .zero, configuration: configuration)
         configure()
@@ -192,18 +161,19 @@ final class FitToViewWebView: WKWebView {
                 return
             }
 
-            let scale = min(
-                self.bounds.width / contentWidth,
-                self.bounds.height / contentHeight,
-                1
-            )
+            let widthScale = self.bounds.width / contentWidth
+            let heightScale = self.bounds.height / contentHeight
+            let scale = min(widthScale, heightScale, 1)
+            let needsScroll = contentHeight * scale > self.bounds.height - 1
 
             let applyScript = """
             (function() {
                 var scale = \(scale);
+                var needsScroll = \(needsScroll);
                 document.body.style.transformOrigin = 'top left';
-                document.body.style.transform = 'scale(' + scale + ')';
-                document.body.style.width = \(contentWidth) + 'px';
+                document.body.style.transform = needsScroll ? 'none' : 'scale(' + scale + ')';
+                document.body.style.width = needsScroll ? '100%' : \(contentWidth) + 'px';
+                document.documentElement.style.overflowY = needsScroll ? 'auto' : 'hidden';
                 return scale;
             })();
             """
