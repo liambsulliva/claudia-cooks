@@ -168,6 +168,8 @@ private struct InteractiveIngredientGraphCanvas: View {
     @State private var positions: [String: CGPoint] = [:]
     @State private var velocities: [String: CGVector] = [:]
     @State private var draggingNodeID: String?
+    @State private var hoveredNodeID: String?
+    @State private var hoverViewportPoint: CGPoint?
     @State private var dragTarget: CGPoint?
     @State private var lastFrameDate: Date?
     @State private var viewportScale: CGFloat = 1
@@ -196,12 +198,26 @@ private struct InteractiveIngredientGraphCanvas: View {
                         zoomViewport(by: factor, at: anchor)
                     }
                 }
+                .onContinuousHover(coordinateSpace: .named("ingredientGraphViewport")) { phase in
+                    switch phase {
+                    case .active(let location):
+                        hoverViewportPoint = location
+                        updateHoveredNode(atViewportPoint: location)
+                    case .ended:
+                        guard draggingNodeID == nil else {
+                            return
+                        }
+                        hoverViewportPoint = nil
+                        hoveredNodeID = nil
+                    }
+                }
                 .onAppear {
                     seedPhysics(in: canvasSize, preservingExisting: false)
                     lastFrameDate = timeline.date
                 }
                 .onChange(of: timeline.date) { _, date in
                     stepPhysics(at: date, canvasSize: canvasSize)
+                    refreshHoveredNode()
                 }
                 .onChange(of: canvasSize) { _, newSize in
                     guard newSize.width > 1, newSize.height > 1 else {
@@ -211,6 +227,7 @@ private struct InteractiveIngredientGraphCanvas: View {
                 }
                 .onChange(of: graph.layoutKey) { _, _ in
                     seedPhysics(in: canvasSize, preservingExisting: true)
+                    hoveredNodeID = nil
                 }
             }
         }
@@ -218,7 +235,9 @@ private struct InteractiveIngredientGraphCanvas: View {
     }
 
     private func graphContent(canvasSize: CGSize) -> some View {
-        ZStack {
+        let neighborNodeIDs = hoveredNeighborNodeIDs()
+
+        return ZStack {
             Canvas { context, _ in
                 drawEdges(in: &context)
             }
@@ -227,36 +246,69 @@ private struct InteractiveIngredientGraphCanvas: View {
             ForEach(graph.nodes) { node in
                 let radius = graph.radius(for: node)
                 let center = positions[node.id] ?? CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
-                let isEmphasized = isNodeEmphasized(node)
+                let highlight = highlight(for: node, hoveredNeighborNodeIDs: neighborNodeIDs)
 
                 IngredientGraphNodeBubble(
                     node: node,
                     radius: radius,
                     isDragging: draggingNodeID == node.id,
-                    isDimmed: !isEmphasized
+                    highlight: highlight
                 )
                 .position(center)
                 .gesture(nodeDragGesture(node: node, canvasSize: canvasSize))
-                .zIndex(nodeZIndex(for: node, isEmphasized: isEmphasized))
+                .zIndex(nodeZIndex(for: node, highlight: highlight))
             }
         }
         .frame(width: canvasSize.width, height: canvasSize.height)
     }
 
-    private func isNodeEmphasized(_ node: IngredientGraphNode) -> Bool {
-        guard let highlightedCategory else {
-            return true
-        }
-
-        return node.category == highlightedCategory
+    private func focusNodeID() -> String? {
+        draggingNodeID ?? hoveredNodeID
     }
 
-    private func nodeZIndex(for node: IngredientGraphNode, isEmphasized: Bool) -> Double {
+    private func hoveredNeighborNodeIDs() -> Set<String> {
+        guard highlightedCategory == nil, let focusNodeID = focusNodeID() else {
+            return []
+        }
+
+        return graph.edges.reduce(into: Set<String>()) { result, edge in
+            if edge.sourceID == focusNodeID {
+                result.insert(edge.targetID)
+            } else if edge.targetID == focusNodeID {
+                result.insert(edge.sourceID)
+            }
+        }
+    }
+
+    private func highlight(
+        for node: IngredientGraphNode,
+        hoveredNeighborNodeIDs: Set<String>
+    ) -> IngredientGraphNodeHighlight {
+        if let highlightedCategory {
+            return node.category == highlightedCategory ? .normal : .dimmed
+        }
+
+        guard let focusNodeID = focusNodeID() else {
+            return .normal
+        }
+
+        if node.id == focusNodeID {
+            return .focused
+        }
+
+        return hoveredNeighborNodeIDs.contains(node.id) ? .connected : .dimmed
+    }
+
+    private func nodeZIndex(for node: IngredientGraphNode, highlight: IngredientGraphNodeHighlight) -> Double {
         if draggingNodeID == node.id {
             return 2
         }
 
-        if highlightedCategory != nil, isEmphasized {
+        if highlight == .focused {
+            return 1.5
+        }
+
+        if highlight == .normal || highlight == .connected {
             return 1
         }
 
@@ -264,7 +316,7 @@ private struct InteractiveIngredientGraphCanvas: View {
     }
 
     private func drawEdges(in context: inout GraphicsContext) {
-        let categoryByNodeID = Dictionary(uniqueKeysWithValues: graph.nodes.map { ($0.id, $0.category) })
+        let nodeByID = Dictionary(uniqueKeysWithValues: graph.nodes.map { ($0.id, $0) })
 
         for edge in graph.edges {
             guard let source = positions[edge.sourceID], let target = positions[edge.targetID] else {
@@ -276,19 +328,70 @@ private struct InteractiveIngredientGraphCanvas: View {
             path.addLine(to: target)
 
             var opacity = min(0.16 + CGFloat(edge.recipeCount) * 0.08, 0.58)
+            var strokeColor = Color.secondary
 
             if let highlightedCategory {
-                let sourceEmphasized = categoryByNodeID[edge.sourceID] == highlightedCategory
-                let targetEmphasized = categoryByNodeID[edge.targetID] == highlightedCategory
+                let sourceEmphasized = nodeByID[edge.sourceID]?.category == highlightedCategory
+                let targetEmphasized = nodeByID[edge.targetID]?.category == highlightedCategory
                 opacity *= sourceEmphasized && targetEmphasized ? 1 : 0.12
+            } else if let focusNodeID = focusNodeID(), let focusedNode = nodeByID[focusNodeID] {
+                let isIncidentToFocusedNode = edge.sourceID == focusNodeID || edge.targetID == focusNodeID
+                if isIncidentToFocusedNode {
+                    strokeColor = focusedNode.category.accentColor
+                    opacity = min(opacity * 1.45, 0.9)
+                } else {
+                    opacity *= 0.12
+                }
             }
 
             context.stroke(
                 path,
-                with: .color(.secondary.opacity(opacity)),
+                with: .color(strokeColor.opacity(opacity)),
                 lineWidth: graph.lineWidth(for: edge)
             )
         }
+    }
+
+    private func refreshHoveredNode() {
+        guard let hoverViewportPoint else {
+            return
+        }
+
+        updateHoveredNode(atViewportPoint: hoverViewportPoint)
+    }
+
+    private func updateHoveredNode(atViewportPoint viewportPoint: CGPoint) {
+        if draggingNodeID != nil {
+            return
+        }
+
+        let graphPoint = graphPoint(for: viewportPoint)
+        let nextHoveredNodeID = graph.nodes.compactMap { node -> (id: String, distanceSquared: CGFloat)? in
+            guard let center = positions[node.id] else {
+                return nil
+            }
+
+            let radius = graph.radius(for: node)
+            let deltaX = graphPoint.x - center.x
+            let deltaY = graphPoint.y - center.y
+            let distanceSquared = deltaX * deltaX + deltaY * deltaY
+
+            guard distanceSquared <= radius * radius else {
+                return nil
+            }
+
+            return (node.id, distanceSquared)
+        }
+        .min { lhs, rhs in
+            lhs.distanceSquared < rhs.distanceSquared
+        }?
+        .id
+
+        guard hoveredNodeID != nextHoveredNodeID else {
+            return
+        }
+
+        hoveredNodeID = nextHoveredNodeID
     }
 
     private func nodeDragGesture(node: IngredientGraphNode, canvasSize: CGSize) -> some Gesture {
@@ -305,6 +408,8 @@ private struct InteractiveIngredientGraphCanvas: View {
                         in: canvasSize
                     )
                     draggingNodeID = node.id
+                    hoveredNodeID = node.id
+                    hoverViewportPoint = value.location
                     dragTarget = pinned
                     positions[node.id] = pinned
                     velocities[node.id] = .zero
@@ -313,6 +418,7 @@ private struct InteractiveIngredientGraphCanvas: View {
             .onEnded { _ in
                 draggingNodeID = nil
                 dragTarget = nil
+                refreshHoveredNode()
             }
     }
 
@@ -546,17 +652,28 @@ private struct IngredientGraphViewportEventCatcher: NSViewRepresentable {
     }
 }
 
+private enum IngredientGraphNodeHighlight: Equatable {
+    case normal
+    case focused
+    case connected
+    case dimmed
+}
+
 private struct IngredientGraphNodeBubble: View {
     let node: IngredientGraphNode
     let radius: CGFloat
     let isDragging: Bool
-    var isDimmed = false
+    var highlight: IngredientGraphNodeHighlight = .normal
 
-    private var fillTopOpacity: Double { isDimmed ? 0.08 : 0.24 }
-    private var fillBottomOpacity: Double { isDimmed ? 0.04 : 0.10 }
-    private var strokeOpacity: Double { isDimmed ? 0.22 : 1 }
-    private var countOpacity: Double { isDimmed ? 0.35 : 1 }
-    private var shadowOpacity: Double { isDimmed ? 0.06 : (isDragging ? 0.35 : 0.18) }
+    private var isDimmed: Bool { highlight == .dimmed }
+    private var isConnected: Bool { highlight == .connected }
+    private var nodeColor: Color { isConnected ? Color(nsColor: .lightGray) : node.category.accentColor }
+    private var labelColor: Color { isConnected ? Color(nsColor: .lightGray) : .primary }
+    private var fillTopOpacity: Double { isDimmed ? 0.08 : (isConnected ? 0.20 : 0.24) }
+    private var fillBottomOpacity: Double { isDimmed ? 0.04 : (isConnected ? 0.10 : 0.10) }
+    private var strokeOpacity: Double { isDimmed ? 0.22 : (isConnected ? 0.9 : 1) }
+    private var countOpacity: Double { isDimmed ? 0.35 : (isConnected ? 0.9 : 1) }
+    private var shadowOpacity: Double { isDimmed ? 0.06 : (isDragging ? 0.35 : (isConnected ? 0.14 : 0.18)) }
 
     var body: some View {
         ZStack {
@@ -564,8 +681,8 @@ private struct IngredientGraphNodeBubble: View {
                 .fill(
                     LinearGradient(
                         colors: [
-                            node.category.accentColor.opacity(fillTopOpacity),
-                            node.category.accentColor.opacity(fillBottomOpacity)
+                            nodeColor.opacity(fillTopOpacity),
+                            nodeColor.opacity(fillBottomOpacity)
                         ],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
@@ -574,17 +691,17 @@ private struct IngredientGraphNodeBubble: View {
 
             Circle()
                 .strokeBorder(
-                    node.category.accentColor.opacity(strokeOpacity),
+                    nodeColor.opacity(strokeOpacity),
                     lineWidth: isDragging ? 2.5 : 2
                 )
 
             Text("\(node.occurrenceCount)")
                 .font(.caption.weight(.bold))
-                .foregroundStyle(node.category.accentColor.opacity(countOpacity))
+                .foregroundStyle(nodeColor.opacity(countOpacity))
         }
         .frame(width: radius * 2, height: radius * 2)
         .shadow(
-            color: node.category.accentColor.opacity(shadowOpacity),
+            color: nodeColor.opacity(shadowOpacity),
             radius: isDragging ? 10 : 4,
             y: 2
         )
@@ -592,14 +709,14 @@ private struct IngredientGraphNodeBubble: View {
         .overlay(alignment: .top) {
             Text(node.name)
                 .font(.caption2.weight(.semibold))
-                .foregroundStyle(.primary)
+                .foregroundStyle(labelColor)
                 .fixedSize(horizontal: true, vertical: false)
                 .offset(y: radius * 2 + 6)
                 .opacity(isDimmed ? 0.3 : 1)
         }
         .opacity(isDimmed ? 0.55 : 1)
         .saturation(isDimmed ? 0.25 : 1)
-        .animation(.easeInOut(duration: 0.2), value: isDimmed)
+        .animation(.easeInOut(duration: 0.2), value: highlight)
         .animation(.spring(response: 0.28, dampingFraction: 0.72), value: isDragging)
     }
 }
