@@ -204,7 +204,7 @@ struct MLXClient: Sendable {
             container,
             instructions: ingredientCategorySystemPrompt,
             generateParameters: GenerateParameters(
-                maxTokens: 320,
+                maxTokens: 512,
                 temperature: 0,
                 topP: 0.9,
                 repetitionPenalty: 1.02
@@ -241,10 +241,21 @@ struct MLXClient: Sendable {
     private var ingredientCategorySystemPrompt: String {
         """
         You classify cooking ingredients for a recipe graph.
-        Assign each ingredient to exactly one category key: protein, carbs, veg, cheese, aromatics, sauces.
+        Assign each ingredient to exactly one category key:
+        protein, carbs, produce, dairy, fats, aromatics, spices, acids, liquids, enhancers.
+        protein = meat, poultry, seafood, eggs, tofu, beans, lentils.
+        carbs = grains, pasta, bread, rice, noodles, starchy roots like potato.
+        produce = fresh vegetables and fruit used as vegetables.
+        dairy = milk, cheese, yogurt, cream.
+        fats = oils, butter, ghee, lard, rendered fat.
+        aromatics = garlic, onion, ginger, shallot, fresh chiles used for base flavor.
+        spices = dried spices and dried herbs (not fresh herb garnishes).
+        acids = vinegar, citrus juice, pickled brine used for acidity.
+        liquids = broth, stock, wine, water, coconut milk as a cooking liquid.
+        enhancers = soy sauce, fish sauce, miso, mustard, Worcestershire, umami pastes and condiments.
         Reply with a single JSON object only. No markdown, no code fences, no commentary.
         Do not prepend the ingredients with adjectives like "chopped", "sliced", "diced", etc.
-        Example: {"chicken breasts":"protein","olive oil":"sauces","basil":"aromatics"}
+        Example: {"chicken breasts":"protein","olive oil":"fats","lemon juice":"acids","soy sauce":"enhancers"}
         """
     }
 
@@ -264,7 +275,7 @@ struct MLXClient: Sendable {
                 ?? object.first(where: { IngredientLineParser.normalizedName(for: $0.key) == IngredientLineParser.normalizedName(for: name) })
                     .flatMap { stringValue(from: $0.value) }
 
-            guard let rawValue, let category = IngredientCategory(rawValue: rawValue.lowercased()) else {
+            guard let rawValue, let category = IngredientCategory(storageKey: rawValue) else {
                 continue
             }
 

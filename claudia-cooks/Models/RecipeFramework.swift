@@ -51,9 +51,11 @@ enum RecipeFramework: String, CaseIterable, Codable, Identifiable, Sendable {
     var applicableCategories: [IngredientCategory] {
         switch self {
         case .salad:
-            [.protein, .veg, .cheese, .aromatics, .sauces]
-        case .stirFry, .soup, .braise:
-            [.protein, .carbs, .veg, .aromatics, .sauces]
+            [.protein, .produce, .dairy, .fats, .aromatics, .spices, .acids, .enhancers]
+        case .stirFry:
+            [.protein, .carbs, .produce, .fats, .aromatics, .spices, .acids, .liquids, .enhancers]
+        case .soup, .braise:
+            [.protein, .carbs, .produce, .dairy, .fats, .aromatics, .spices, .acids, .liquids, .enhancers]
         case .bowl, .sandwich:
             IngredientCategory.allCases
         }

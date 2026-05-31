@@ -28,9 +28,19 @@ struct IngredientCategorySection: View {
             }
 
             GlassEffectContainer(spacing: 8) {
-                LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
-                    ForEach(IngredientCatalog.options(for: category), id: \.self) { option in
-                        ingredientChip(for: option)
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(IngredientCatalog.optionGroups(for: category), id: \.subgroup) { group in
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(group.subgroup)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(category.accentColor.opacity(0.85))
+
+                            LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
+                                ForEach(group.options, id: \.self) { option in
+                                    ingredientChip(for: option)
+                                }
+                            }
+                        }
                     }
                 }
             }

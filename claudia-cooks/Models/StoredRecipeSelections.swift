@@ -24,13 +24,13 @@ extension RecipeSelections {
 
     init(stored: StoredRecipeSelections) {
         selectedOptions = stored.selectedOptions.reduce(into: [:]) { result, entry in
-            guard let category = IngredientCategory(rawValue: entry.key) else {
+            guard let category = IngredientCategory(storageKey: entry.key) else {
                 return
             }
-            result[category] = Set(entry.value)
+            result[category, default: []].formUnion(entry.value)
         }
         otherText = stored.otherText.reduce(into: [:]) { result, entry in
-            guard let category = IngredientCategory(rawValue: entry.key) else {
+            guard let category = IngredientCategory(storageKey: entry.key) else {
                 return
             }
             result[category] = entry.value
