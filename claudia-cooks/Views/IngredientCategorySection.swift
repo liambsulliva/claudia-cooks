@@ -76,7 +76,7 @@ struct IngredientCategorySection: View {
                 .background(.background.opacity(0.65), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .padding(16)
-        .frame(maxWidth: .infinity, minHeight: 148, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .fill(
