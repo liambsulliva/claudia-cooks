@@ -60,42 +60,56 @@ struct IngredientOptionChip: View {
     private var chipButton: some View {
         let label = chipLabel
 
-        if isActive {
-            Button(action: handleTap) {
-                label
+        Group {
+            if isActive {
+                Button(action: handleTap) {
+                    label
+                }
+                .buttonStyle(.glassProminent)
+                .tint(category.accentColor)
+            } else {
+                Button(action: handleTap) {
+                    label
+                }
+                .buttonStyle(.glass)
             }
-            .buttonStyle(.glassProminent)
-            .tint(category.accentColor)
-            .buttonBorderShape(.roundedRectangle(radius: 10))
-            .simultaneousGesture(variantHoldGesture)
-            .gesture(RightClickGesture(onRightClick: presentVariantMenuFromRightClick))
-        } else {
-            Button(action: handleTap) {
-                label
-            }
-            .buttonStyle(.glass)
-            .buttonBorderShape(.roundedRectangle(radius: 10))
-            .simultaneousGesture(variantHoldGesture)
-            .gesture(RightClickGesture(onRightClick: presentVariantMenuFromRightClick))
         }
+        .buttonBorderShape(.roundedRectangle(radius: 10))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .simultaneousGesture(variantHoldGesture)
+        .gesture(RightClickGesture(onRightClick: presentVariantMenuFromRightClick))
     }
 
     private var chipLabel: some View {
-        VStack(spacing: 2) {
-            Text(option)
-                .font(.caption)
-                .fontWeight(isActive ? .semibold : .regular)
-                .lineLimit(1)
+        HStack(alignment: .center, spacing: ChipLabelMetrics.labelSpacing) {
+            VStack(alignment: .leading, spacing: ChipLabelMetrics.lineSpacing) {
+                Text(option)
+                    .font(.caption)
+                    .fontWeight(isActive ? .semibold : .regular)
+                    .lineLimit(1)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
-            if !selectionState.variants.isEmpty {
-                Text(selectionState.variants.joined(separator: ", "))
-                    .font(.system(size: 9))
+                if !selectionState.variants.isEmpty {
+                    Text(selectionState.variants.joined(separator: ", "))
+                        .font(.system(size: ChipLabelMetrics.variantFontSize))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if variants != nil {
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.semibold))
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.center)
             }
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(minHeight: ChipLabelMetrics.minContentHeight, alignment: .center)
+        .frame(maxHeight: .infinity, alignment: .center)
     }
 
     private var variantHoldGesture: some Gesture {
@@ -209,4 +223,11 @@ struct IngredientOptionChip: View {
 
         return variants[index]
     }
+}
+
+private enum ChipLabelMetrics {
+    static let lineSpacing: CGFloat = 2
+    static let labelSpacing: CGFloat = 4
+    static let variantFontSize: CGFloat = 9
+    static let minContentHeight: CGFloat = 28
 }
