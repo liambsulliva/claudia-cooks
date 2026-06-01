@@ -101,7 +101,8 @@ final class RecipeSessionController {
             title: recipe.title,
             framework: activeFramework ?? framework,
             recipeMarkdown: recipeMarkdown,
-            selections: selections
+            selections: selections,
+            ingredientEntries: GeneratedIngredient.sanitized(recipe.ingredientEntries)
         )
     }
 

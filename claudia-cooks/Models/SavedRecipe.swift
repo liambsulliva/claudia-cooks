@@ -14,4 +14,5 @@ struct SavedRecipe: Identifiable, Codable, Hashable {
     var fileName: String
     var isBlank: Bool = false
     var selections: StoredRecipeSelections = StoredRecipeSelections()
+    var ingredientEntries: [GeneratedIngredient] = []
 }

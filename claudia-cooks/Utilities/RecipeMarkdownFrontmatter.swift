@@ -14,6 +14,7 @@ enum RecipeMarkdownFrontmatter {
         var updatedAt: Date
         var isBlank: Bool
         var selections: StoredRecipeSelections
+        var ingredientEntries: [GeneratedIngredient]
 
         init(from recipe: SavedRecipe) {
             id = recipe.id
@@ -23,6 +24,19 @@ enum RecipeMarkdownFrontmatter {
             updatedAt = recipe.updatedAt
             isBlank = recipe.isBlank
             selections = recipe.selections
+            ingredientEntries = recipe.ingredientEntries
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = try container.decode(UUID.self, forKey: .id)
+            title = try container.decode(String.self, forKey: .title)
+            framework = try container.decode(RecipeFramework.self, forKey: .framework)
+            createdAt = try container.decode(Date.self, forKey: .createdAt)
+            updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+            isBlank = try container.decodeIfPresent(Bool.self, forKey: .isBlank) ?? false
+            selections = try container.decodeIfPresent(StoredRecipeSelections.self, forKey: .selections) ?? StoredRecipeSelections()
+            ingredientEntries = try container.decodeIfPresent([GeneratedIngredient].self, forKey: .ingredientEntries) ?? []
         }
 
         func savedRecipe(fileName: String) -> SavedRecipe {
@@ -34,7 +48,8 @@ enum RecipeMarkdownFrontmatter {
                 updatedAt: updatedAt,
                 fileName: fileName,
                 isBlank: isBlank,
-                selections: selections
+                selections: selections,
+                ingredientEntries: GeneratedIngredient.sanitized(ingredientEntries)
             )
         }
     }
@@ -93,5 +108,4 @@ enum RecipeMarkdownFrontmatter {
         decoder.dateDecodingStrategy = .iso8601
         return try? decoder.decode(Metadata.self, from: data)
     }
-
 }

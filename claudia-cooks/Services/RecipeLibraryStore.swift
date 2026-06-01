@@ -77,7 +77,11 @@ final class RecipeLibraryStore {
         }
     }
 
-    func updateRecipeMarkdown(_ markdown: String, for recipeID: UUID) {
+    func updateRecipeMarkdown(
+        _ markdown: String,
+        for recipeID: UUID,
+        ingredientEntries: [GeneratedIngredient]? = nil
+    ) {
         guard let index = recipes.firstIndex(where: { $0.id == recipeID }) else {
             return
         }
@@ -89,6 +93,13 @@ final class RecipeLibraryStore {
 
             recipes[index].isBlank = false
             recipes[index].updatedAt = Date()
+
+            if let ingredientEntries {
+                let sanitized = GeneratedIngredient.sanitized(ingredientEntries)
+                if !sanitized.isEmpty {
+                    recipes[index].ingredientEntries = sanitized
+                }
+            }
 
             let fileName = try writeRecipeDocument(recipes[index], body: body)
             recipes[index].fileName = fileName
@@ -144,7 +155,8 @@ final class RecipeLibraryStore {
         title: String,
         framework: RecipeFramework,
         recipeMarkdown: String,
-        selections: RecipeSelections
+        selections: RecipeSelections,
+        ingredientEntries: [GeneratedIngredient] = []
     ) {
         do {
             try ensureLibraryDirectory()
@@ -160,6 +172,9 @@ final class RecipeLibraryStore {
                 recipes[existingIndex].updatedAt = now
                 recipes[existingIndex].isBlank = false
                 recipes[existingIndex].selections = selections.stored
+                if !ingredientEntries.isEmpty {
+                    recipes[existingIndex].ingredientEntries = ingredientEntries
+                }
             } else {
                 recipes.append(
                     SavedRecipe(
@@ -170,7 +185,8 @@ final class RecipeLibraryStore {
                         updatedAt: now,
                         fileName: previousFileName,
                         isBlank: false,
-                        selections: selections.stored
+                        selections: selections.stored,
+                        ingredientEntries: ingredientEntries
                     )
                 )
             }

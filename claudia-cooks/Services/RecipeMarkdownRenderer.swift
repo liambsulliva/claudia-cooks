@@ -15,7 +15,7 @@ enum RecipeMarkdownRenderer {
                 htmlTitle(recipe.title, framework: framework),
                 paragraph(recipe.summary),
                 section("Ingredients"),
-                bullets(recipe.ingredients, emptyMessage: "No ingredients generated yet."),
+                bullets(recipe.markdownIngredientLines, emptyMessage: "No ingredients generated yet."),
                 section("Steps"),
                 numbered(recipe.steps, emptyMessage: "No steps generated yet."),
                 section("Tips"),

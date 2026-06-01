@@ -392,6 +392,7 @@ enum RecipeEditToolCallApplier {
             }
         case .ingredients:
             apply(change, to: &editedRecipe.ingredients)
+            editedRecipe.syncEntriesFromIngredients()
         case .steps:
             apply(change, to: &editedRecipe.steps)
         case .tips:
@@ -460,6 +461,10 @@ enum RecipeEditToolCallApplier {
             default:
                 continue
             }
+        }
+
+        if changes.contains(where: { $0.section == .ingredients }) {
+            editedRecipe.syncEntriesFromIngredients()
         }
 
         return RecipeEditPatchResult(recipe: editedRecipe, changes: changes)

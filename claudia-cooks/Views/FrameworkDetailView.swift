@@ -84,7 +84,6 @@ struct FrameworkDetailView: View {
                     case .graph:
                         IngredientGraphView(
                             recipes: libraryStore.recipes,
-                            recipeMarkdown: { session.recipeMarkdown(for: $0, libraryStore: libraryStore) },
                             contentRefreshKey: viewModel.recipeMarkdown
                         )
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -258,7 +257,18 @@ struct FrameworkDetailView: View {
                 return
             }
 
-            libraryStore.updateRecipeMarkdown(markdown, for: recipeID)
+            let libraryEntries = libraryStore.recipe(for: recipeID)?.ingredientEntries ?? []
+            let liveEntries = recipeID == session.sessionID
+                ? (viewModel.currentRecipe?.ingredientEntries ?? [])
+                : []
+            let structuredEntries = !GeneratedIngredient.sanitized(liveEntries).isEmpty
+                ? liveEntries
+                : libraryEntries
+            libraryStore.updateRecipeMarkdown(
+                markdown,
+                for: recipeID,
+                ingredientEntries: structuredEntries
+            )
         }
     }
 
@@ -361,7 +371,10 @@ struct FrameworkDetailView: View {
         )
 
         if let markdown = libraryStore.recipeMarkdown(for: recipe), !markdown.isEmpty {
-            viewModel.updateRecipeMarkdown(markdown)
+            viewModel.updateRecipeMarkdown(
+                markdown,
+                preservedIngredientEntries: recipe.ingredientEntries
+            )
 
             if recipe.id == session.sessionID {
                 session.liveRecipeMarkdown = markdown

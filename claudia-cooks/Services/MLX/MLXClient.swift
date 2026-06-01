@@ -85,30 +85,59 @@ struct MLXClient: Sendable {
             tips: []
         )
 
+        let titleSummaryResponse = try await streamChatResponse(
+            container: container,
+            instructions: titleSummarySystemPrompt(for: framework),
+            userMessage: titleSummaryUserPrompt(framework: framework, selections: selections),
+            maxTokens: 180
+        ) { partialText in
+            guard let partial = GeneratedRecipe.decodePartialAssistantResponse(partialText) else {
+                return
+            }
+
+            if partial.hasMinimumTitleSummaryContent {
+                recipe.title = partial.title
+                recipe.summary = partial.summary
+            }
+            onPartialResponse?(recipe)
+        }
+
+        guard let titleSummaryRecipe = GeneratedRecipe.decodePartialAssistantResponse(titleSummaryResponse),
+              titleSummaryRecipe.hasMinimumTitleSummaryContent else {
+            throw MLXClientError.invalidRecipePayload
+        }
+
+        recipe.title = titleSummaryRecipe.title
+        recipe.summary = titleSummaryRecipe.summary
+        onPartialResponse?(recipe)
+
         let ingredientsResponse = try await streamChatResponse(
             container: container,
             instructions: ingredientsSystemPrompt(for: framework),
-            userMessage: ingredientsUserPrompt(framework: framework, selections: selections),
+            userMessage: ingredientsUserPrompt(
+                framework: framework,
+                selections: selections,
+                title: recipe.title,
+                summary: recipe.summary
+            ),
             maxTokens: 420
         ) { partialText in
             guard let partial = GeneratedRecipe.decodePartialAssistantResponse(partialText) else {
                 return
             }
 
-            recipe.title = partial.title
-            recipe.summary = partial.summary
-            recipe.ingredients = partial.ingredients
+            if !partial.ingredientEntries.isEmpty {
+                recipe.applyStructuredIngredientEntries(partial.ingredientEntries)
+            }
             onPartialResponse?(recipe)
         }
 
         guard let ingredientsRecipe = GeneratedRecipe.decodePartialAssistantResponse(ingredientsResponse),
-              ingredientsRecipe.hasMinimumIngredientsContent else {
+              ingredientsRecipe.hasMinimumIngredientsListContent else {
             throw MLXClientError.invalidRecipePayload
         }
 
-        recipe.title = ingredientsRecipe.title
-        recipe.summary = ingredientsRecipe.summary
-        recipe.ingredients = ingredientsRecipe.ingredients
+        recipe.applyStructuredIngredientEntries(ingredientsRecipe.ingredientEntries)
         onPartialResponse?(recipe)
 
         let instructionsResponse = try await streamChatResponse(
@@ -415,17 +444,33 @@ struct MLXClient: Sendable {
             .replacingOccurrences(of: "&", with: "and")
     }
 
+    private func titleSummarySystemPrompt(for framework: RecipeFramework) -> String {
+        """
+        You are a practical cooking assistant for home cooks.
+        Write a concise recipe title and one-sentence summary for a \(framework.title.lowercased()) recipe from the user's selections.
+        Use only the selected ingredients plus common pantry staples such as salt, pepper, oil, water, and vinegar ONLY if applicable.
+        Do not invent unavailable specialty ingredients.
+        Reply with a single JSON object only. No markdown, no code fences, no commentary, no thinking tags.
+        Required keys: title, summary.
+        Example shape:
+        {"title":"Garlic Herb Chicken","summary":"A quick skillet dinner with crisp skin and fresh herbs."}
+        """
+    }
+
     private func ingredientsSystemPrompt(for framework: RecipeFramework) -> String {
         """
         You are a practical cooking assistant for home cooks.
         Generate the ingredient list for a concise \(framework.title.lowercased()) recipe from the user's selections.
-        Use only the selected ingredients plus common pantry staples such as salt, pepper, oil, water, and vinegar.
+        Use only the selected ingredients plus common pantry staples such as salt, pepper, oil, water, and vinegar ONLY if applicable.
         Do not invent unavailable specialty ingredients.
         Reply with a single JSON object only. No markdown, no code fences, no commentary, no thinking tags.
-        Required keys: title, summary, ingredients.
-        ingredients must be a JSON array of strings with quantities (for example "2 chicken breasts", "1 tbsp olive oil").
+        Required key: ingredients.
+        ingredients must be a JSON array of objects. Each object requires "name" (ingredient only, no amount, no variant, e.g. "chicken").
+        Include "quantity" (e.g. "2", "1 tbsp") and ensure that measurements are included when applicable to the ingredient.
+        Include "variant" only when a catalog ingredient has multiple types and you need to disambiguate which type you used (e.g. "breast"); omit it otherwise.
+        The app concatenates quantity, variant, and name for markdown in a natural order (e.g. quantity "2" + variant "breast" + name "chicken" → "2 chicken breasts").
         Example shape:
-        {"title":"Garlic Herb Chicken","summary":"A quick skillet dinner.","ingredients":["2 chicken breasts","2 cloves garlic","1 tbsp olive oil"]}
+        {"ingredients":[{"quantity":"2","name":"chicken","variant":"breast"},{"quantity":"2", "name":"garlic", "variant":"clove"},{"quantity":"1 tbsp","name":"olive oil"}]}
         """
     }
 
@@ -584,12 +629,12 @@ struct MLXClient: Sendable {
         return (sections, ingredientLines, customPrompt)
     }
 
-    private func ingredientsUserPrompt(framework: RecipeFramework, selections: RecipeSelections) -> String {
+    private func titleSummaryUserPrompt(framework: RecipeFramework, selections: RecipeSelections) -> String {
         let context = sharedPromptSections(framework: framework, selections: selections)
 
         let ingredientInstruction = context.ingredientLines.isEmpty
             ? ""
-            : "\nUse only the selected ingredients, plus common pantry staples such as salt, pepper, oil, water, and vinegar."
+            : "\nBase the title and summary on the selected ingredients, plus common pantry staples only when needed."
 
         let customInstruction = context.customPrompt.isEmpty
             ? ""
@@ -599,11 +644,70 @@ struct MLXClient: Sendable {
             """
             \(context.sections.joined(separator: "\n\n"))
 
-            Generate the recipe title, summary, and ingredient list.\(ingredientInstruction)\(customInstruction)
-            Return one JSON object with keys title, summary, and ingredients only.
+            Generate the recipe title and summary.\(ingredientInstruction)\(customInstruction)
+            Return one JSON object with keys title and summary only.
             Start with { and end with }. Do not wrap the JSON in markdown.
             """
         )
+    }
+
+    private func ingredientsUserPrompt(
+        framework: RecipeFramework,
+        selections: RecipeSelections,
+        title: String,
+        summary: String
+    ) -> String {
+        let context = sharedPromptSections(framework: framework, selections: selections)
+
+        let ingredientInstruction = context.ingredientLines.isEmpty
+            ? ""
+            : "\nUse only the selected ingredients, plus common pantry staples such as salt, pepper, oil, water, and vinegar ONLY when applicable."
+
+        let variantInstruction = variantSelectionPromptLines(for: selections, categories: framework.applicableCategories)
+
+        let customInstruction = context.customPrompt.isEmpty
+            ? ""
+            : "\nHonor the user's request while keeping the recipe practical for home cooks."
+
+        return sanitizePromptText(
+            """
+            \(context.sections.joined(separator: "\n\n"))
+
+            Recipe title: \(sanitizePromptText(title))
+            Summary: \(sanitizePromptText(summary))
+
+            Generate the ingredient list for this recipe.\(ingredientInstruction)\(variantInstruction)\(customInstruction)
+            Return one JSON object with key ingredients only.
+            Each ingredient is an object with "name" (no amount), optional "quantity", and optional "variant" (only for typed catalog items).
+            Start with { and end with }. Do not wrap the JSON in markdown.
+            """
+        )
+    }
+
+    private func variantSelectionPromptLines(
+        for selections: RecipeSelections,
+        categories: [IngredientCategory]
+    ) -> String {
+        let lines = categories.flatMap { category -> [String] in
+            selections.selectedOptions[category, default: []].compactMap { selection -> String? in
+                guard let variant = IngredientSelectionLabel.variantLabel(from: selection) else {
+                    return nil
+                }
+
+                let base = IngredientSelectionLabel.baseOption(from: selection)
+                return "- \(sanitizePromptText(base)): user chose variant \"\(sanitizePromptText(variant))\""
+            }
+        }
+
+        guard !lines.isEmpty else {
+            return ""
+        }
+
+        return """
+
+        When an ingredient below has a chosen variant, set "variant" on that ingredient object to match:
+        \(lines.joined(separator: "\n"))
+        """
     }
 
     private func instructionsUserPrompt(

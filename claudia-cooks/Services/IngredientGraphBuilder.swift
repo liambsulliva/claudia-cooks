@@ -145,15 +145,11 @@ struct IngredientGraphData: Equatable {
 
 enum IngredientGraphBuilder {
     @MainActor
-    static func build(
-        recipes: [SavedRecipe],
-        recipeMarkdown: (SavedRecipe) -> String?,
-        mlx: MLXClient = MLXClient()
-    ) async -> IngredientGraphData {
+    static func build(recipes: [SavedRecipe]) -> IngredientGraphData {
         var pendingEntries: [IngredientGraphEntry] = []
 
         for recipe in recipes where !recipe.isBlank {
-            pendingEntries.append(contentsOf: entries(for: recipe, recipeMarkdown: recipeMarkdown))
+            pendingEntries.append(contentsOf: entries(for: recipe))
         }
 
         pendingEntries.removeAll { entry in
@@ -164,75 +160,29 @@ enum IngredientGraphBuilder {
             return .empty
         }
 
-        let categories = await resolveCategories(for: pendingEntries, mlx: mlx)
-        return graphData(from: pendingEntries, categories: categories)
+        return graphData(from: pendingEntries)
     }
 
-    @MainActor
-    private static func resolveCategories(
-        for entries: [IngredientGraphEntry],
-        mlx: MLXClient
-    ) async -> [String: IngredientCategory] {
-        var resolved: [String: IngredientCategory] = [:]
-        var uncategorizedByNormalized: [String: String] = [:]
-
-        for entry in entries {
-            if let category = entry.catalogCategory {
-                resolved[entry.normalizedName] = category
-            } else if let cached = await IngredientCategoryCache.shared.category(
-                forNormalizedName: entry.normalizedName
-            ) {
-                resolved[entry.normalizedName] = cached
-            } else if resolved[entry.normalizedName] == nil {
-                uncategorizedByNormalized[entry.normalizedName] = entry.name
-            }
-        }
-
-        guard !uncategorizedByNormalized.isEmpty else {
-            return resolved
-        }
-
-        let namesToClassify = uncategorizedByNormalized.values.sorted()
-
-        if await mlx.availability() == .ready,
-           let mlxCategories = try? await mlx.categorizeIngredients(namesToClassify) {
-            await IngredientCategoryCache.shared.store(mlxCategories)
-            for (name, category) in mlxCategories {
-                resolved[IngredientLineParser.normalizedName(for: name)] = category
-            }
-        }
-
-        return resolved
-    }
-
-    private static func graphData(
-        from entries: [IngredientGraphEntry],
-        categories: [String: IngredientCategory]
-    ) -> IngredientGraphData {
+    private static func graphData(from entries: [IngredientGraphEntry]) -> IngredientGraphData {
         var nodeAccumulators: [String: IngredientNodeAccumulator] = [:]
         var edgeCounts: [IngredientEdgeKey: Int] = [:]
         var recipeIDsWithIngredients = Set<UUID>()
 
         for entry in entries {
-            let category = entry.catalogCategory
-                ?? categories[entry.normalizedName]
-                ?? .aromatics
+            let category = entry.catalogCategory ?? .aromatics
 
-            var accumulator = nodeAccumulators[entry.normalizedName] ?? IngredientNodeAccumulator(
+            var accumulator = nodeAccumulators[entry.nodeID] ?? IngredientNodeAccumulator(
                 name: entry.name,
                 category: category
             )
             accumulator.occurrenceCount += 1
-            if let amount = entry.amount {
-                accumulator.recordedAmounts.insert(amount)
-            }
-            nodeAccumulators[entry.normalizedName] = accumulator
+            nodeAccumulators[entry.nodeID] = accumulator
         }
 
         let entriesByRecipe = Dictionary(grouping: entries, by: \.recipeID)
 
         for (recipeID, recipeEntries) in entriesByRecipe {
-            let uniqueInRecipe = Set(recipeEntries.map(\.normalizedName))
+            let uniqueInRecipe = Set(recipeEntries.map(\.nodeID))
             guard !uniqueInRecipe.isEmpty else {
                 continue
             }
@@ -252,7 +202,7 @@ enum IngredientGraphBuilder {
             IngredientGraphNode(
                 id: id,
                 name: accumulator.name,
-                amount: accumulator.displayAmount,
+                amount: nil,
                 category: accumulator.category,
                 occurrenceCount: accumulator.occurrenceCount
             )
@@ -294,30 +244,26 @@ enum IngredientGraphBuilder {
         )
     }
 
-    private static func entries(
-        for recipe: SavedRecipe,
-        recipeMarkdown: (SavedRecipe) -> String?
-    ) -> [IngredientGraphEntry] {
-        if let markdown = recipeMarkdown(recipe) {
-            let generatedLines = RecipeMarkdownIngredientsParser.ingredients(from: markdown)
-            if !generatedLines.isEmpty {
-                return generatedLines.compactMap { line in
-                    guard !RecipeMarkdownIngredientsParser.isLikelyStepContent(line, markdown: markdown) else {
-                        return nil
-                    }
-
-                    let parsed = IngredientLineParser.parse(line)
-                    return IngredientGraphEntry(
-                        recipeID: recipe.id,
-                        name: parsed.name,
-                        amount: parsed.amount,
-                        catalogCategory: RecipeMarkdownIngredientsParser.catalogCategory(for: parsed.name)
-                    )
-                }
-            }
+    private static func entries(for recipe: SavedRecipe) -> [IngredientGraphEntry] {
+        let jsonEntries = recipe.ingredientEntries.compactMap { entry(from: $0, recipeID: recipe.id) }
+        if !jsonEntries.isEmpty {
+            return jsonEntries
         }
 
         return selectionEntries(for: recipe)
+    }
+
+    private static func entry(from ingredient: GeneratedIngredient, recipeID: UUID) -> IngredientGraphEntry? {
+        let name = ingredient.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else {
+            return nil
+        }
+
+        return IngredientGraphEntry(
+            recipeID: recipeID,
+            name: name,
+            catalogCategory: RecipeMarkdownIngredientsParser.catalogCategory(for: name)
+        )
     }
 
     private static func selectionEntries(for recipe: SavedRecipe) -> [IngredientGraphEntry] {
@@ -326,11 +272,15 @@ enum IngredientGraphBuilder {
 
         for category in IngredientCategory.allCases {
             for option in selections.selectedOptions[category, default: []] {
+                let base = IngredientSelectionLabel.baseOption(from: option)
+                guard !base.isEmpty else {
+                    continue
+                }
+
                 entries.append(
                     IngredientGraphEntry(
                         recipeID: recipe.id,
-                        name: option,
-                        amount: nil,
+                        name: base,
                         catalogCategory: category
                     )
                 )
@@ -341,13 +291,11 @@ enum IngredientGraphBuilder {
                     continue
                 }
 
-                let parsed = IngredientLineParser.parse(otherIngredient)
                 entries.append(
                     IngredientGraphEntry(
                         recipeID: recipe.id,
-                        name: parsed.name,
-                        amount: parsed.amount,
-                        catalogCategory: RecipeMarkdownIngredientsParser.catalogCategory(for: parsed.name) ?? category
+                        name: otherIngredient,
+                        catalogCategory: RecipeMarkdownIngredientsParser.catalogCategory(for: otherIngredient) ?? category
                     )
                 )
             }
@@ -382,10 +330,9 @@ struct IngredientGraphEdge: Identifiable, Equatable {
 private struct IngredientGraphEntry: Equatable {
     let recipeID: UUID
     let name: String
-    let amount: String?
     let catalogCategory: IngredientCategory?
 
-    var normalizedName: String {
+    var nodeID: String {
         IngredientLineParser.normalizedName(for: name)
     }
 }
@@ -394,14 +341,6 @@ private struct IngredientNodeAccumulator: Equatable {
     var name: String
     var category: IngredientCategory
     var occurrenceCount = 0
-    var recordedAmounts: Set<String> = []
-
-    var displayAmount: String? {
-        guard recordedAmounts.count == 1 else {
-            return nil
-        }
-        return recordedAmounts.first
-    }
 }
 
 private struct IngredientEdgeKey: Hashable {

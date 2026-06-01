@@ -6,8 +6,16 @@
 import Foundation
 
 extension GeneratedRecipe {
+    var hasMinimumTitleSummaryContent: Bool {
+        hasRealTitle
+    }
+
+    var hasMinimumIngredientsListContent: Bool {
+        !ingredients.isEmpty
+    }
+
     var hasMinimumIngredientsContent: Bool {
-        hasRealTitle && !ingredients.isEmpty
+        hasMinimumTitleSummaryContent && hasMinimumIngredientsListContent
     }
 
     var hasMinimumInstructionsContent: Bool {
@@ -52,7 +60,8 @@ extension GeneratedRecipe {
 
         let title = extractJSONStringField("title", from: trimmed)
         let summary = extractJSONStringField("summary", from: trimmed)
-        let ingredients = extractJSONStringArrayField("ingredients", from: trimmed)
+        let ingredientEntries = extractJSONIngredientEntriesField("ingredients", from: trimmed)
+        let ingredients = ingredientEntries.map(\.displayLine)
         let steps = extractJSONStringArrayField("steps", from: trimmed)
         let tips = extractJSONStringArrayField("tips", from: trimmed)
 
@@ -64,6 +73,7 @@ extension GeneratedRecipe {
             title: title ?? "Generating recipe…",
             summary: summary ?? "",
             ingredients: ingredients,
+            ingredientEntries: ingredientEntries,
             steps: steps,
             tips: tips
         )
@@ -257,7 +267,8 @@ extension GeneratedRecipe {
 
         let title = stringValue(from: object["title"])
         let summary = stringValue(from: object["summary"])
-        let ingredients = stringArray(from: object["ingredients"])
+        let ingredientEntries = ingredientEntries(from: object["ingredients"])
+        let ingredients = ingredientEntries.map(\.displayLine)
         let steps = stringArray(from: object["steps"])
         let tips = stringArray(from: object["tips"])
 
@@ -269,9 +280,60 @@ extension GeneratedRecipe {
             title: title ?? "Untitled Recipe",
             summary: summary ?? "",
             ingredients: ingredients,
+            ingredientEntries: ingredientEntries,
             steps: steps,
             tips: tips
         )
+    }
+
+    private static func ingredientEntries(from value: Any?) -> [GeneratedIngredient] {
+        switch value {
+        case let entries as [GeneratedIngredient]:
+            return GeneratedIngredient.sanitized(entries.filter { !$0.displayLine.isEmpty })
+        case let strings as [String]:
+            return strings.compactMap { entry(fromString: $0) }
+        case let items as [Any]:
+            return items.compactMap { entry(from: $0) }
+        case let string as String:
+            return string
+                .split(whereSeparator: \.isNewline)
+                .compactMap { entry(fromString: String($0)) }
+        default:
+            return []
+        }
+    }
+
+    private static func entry(from value: Any) -> GeneratedIngredient? {
+        switch value {
+        case let string as String:
+            return entry(fromString: string)
+        case let object as [String: Any]:
+            guard let rawName = stringValue(from: object["name"]) else {
+                return nil
+            }
+
+            let explicitQuantity = stringValue(from: object["quantity"])
+            let parsed = explicitQuantity == nil
+                ? IngredientLineParser.parse(rawName)
+                : ParsedIngredientLine(amount: explicitQuantity, name: rawName)
+
+            return GeneratedIngredient(
+                quantity: parsed.amount,
+                name: parsed.name,
+                variant: stringValue(from: object["variant"])
+            )
+        default:
+            return nil
+        }
+    }
+
+    private static func entry(fromString string: String) -> GeneratedIngredient? {
+        let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return nil
+        }
+
+        return GeneratedIngredient.fromIngredientLine(trimmed)
     }
 
     private static func stringValue(from value: Any?) -> String? {
@@ -304,6 +366,21 @@ extension GeneratedRecipe {
         }
     }
 
+    private static func ingredientEntry(fromJSONObjectBody body: String) -> GeneratedIngredient? {
+        guard let name = extractJSONStringField("name", from: "{\(body)}") else {
+            return nil
+        }
+
+        let quantity = extractJSONStringField("quantity", from: "{\(body)}")
+        let variant = extractJSONStringField("variant", from: "{\(body)}")
+
+        return GeneratedIngredient(
+            quantity: quantity,
+            name: name,
+            variant: variant
+        )
+    }
+
     private static func extractJSONStringField(_ field: String, from text: String) -> String? {
         let pattern = #""\#(field)"\s*:\s*"((?:\\.|[^"\\])*)""#
         guard let regex = try? NSRegularExpression(pattern: pattern),
@@ -313,6 +390,42 @@ extension GeneratedRecipe {
         }
 
         return decodeJSONString(String(text[valueRange]))
+    }
+
+    private static func extractJSONIngredientEntriesField(_ field: String, from text: String) -> [GeneratedIngredient] {
+        let openPattern = #""\#(field)"\s*:\s*\[(.*)"#
+        guard let openRegex = try? NSRegularExpression(pattern: openPattern, options: [.dotMatchesLineSeparators]),
+              let match = openRegex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+              let arrayRange = Range(match.range(at: 1), in: text) else {
+            return extractJSONStringArrayField(field, from: text).map {
+                GeneratedIngredient.fromIngredientLine($0)
+            }
+        }
+
+        let arrayBody = String(text[arrayRange])
+        var entries: [GeneratedIngredient] = []
+
+        let objectPattern = #"\{([^{}]*)\}"#
+        if let objectRegex = try? NSRegularExpression(pattern: objectPattern) {
+            for match in objectRegex.matches(in: arrayBody, range: NSRange(arrayBody.startIndex..., in: arrayBody)) {
+                guard let objectRange = Range(match.range(at: 1), in: arrayBody),
+                      let entry = ingredientEntry(fromJSONObjectBody: String(arrayBody[objectRange])) else {
+                    continue
+                }
+
+                entries.append(entry)
+            }
+        }
+
+        if entries.isEmpty {
+            return GeneratedIngredient.sanitized(
+                extractJSONStringArrayField(field, from: text).map {
+                    GeneratedIngredient.fromIngredientLine($0)
+                }
+            )
+        }
+
+        return GeneratedIngredient.sanitized(entries)
     }
 
     private static func extractJSONStringArrayField(_ field: String, from text: String) -> [String] {

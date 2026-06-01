@@ -8,16 +8,17 @@ import AppKit
 
 struct IngredientGraphView: View {
     let recipes: [SavedRecipe]
-    var recipeMarkdown: (SavedRecipe) -> String? = { _ in nil }
     var contentRefreshKey: String = ""
 
     @State private var graph = IngredientGraphData.empty
-    @State private var isResolvingCategories = false
     @State private var highlightedCategory: IngredientCategory?
 
     private var graphRefreshKey: String {
         recipes
-            .map(\.id.uuidString)
+            .map { recipe in
+                let entryNames = recipe.ingredientEntries.map(\.name).joined(separator: ",")
+                return "\(recipe.id.uuidString):\(entryNames)"
+            }
             .joined(separator: "|")
             + "|"
             + contentRefreshKey
@@ -28,7 +29,7 @@ struct IngredientGraphView: View {
             Color(nsColor: .windowBackgroundColor)
                 .ignoresSafeArea()
 
-            if graph.nodes.isEmpty, !isResolvingCategories {
+            if graph.nodes.isEmpty {
                 emptyState
             } else if !graph.nodes.isEmpty {
                 InteractiveIngredientGraphCanvas(
@@ -77,10 +78,6 @@ struct IngredientGraphView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
 
-            if isResolvingCategories {
-                ProgressView()
-                    .controlSize(.small)
-            }
         }
     }
 
@@ -155,13 +152,8 @@ struct IngredientGraphView: View {
     }
 
     @MainActor
-    private func reloadGraph() async {
-        isResolvingCategories = true
-        graph = await IngredientGraphBuilder.build(
-            recipes: recipes,
-            recipeMarkdown: recipeMarkdown
-        )
-        isResolvingCategories = false
+    private func reloadGraph() {
+        graph = IngredientGraphBuilder.build(recipes: recipes)
     }
 }
 
@@ -791,12 +783,16 @@ private struct IngredientGraphNodeBubble: View {
                 updatedAt: .now,
                 fileName: "one.md",
                 isBlank: false,
-                selections: StoredRecipeSelections(
-                    selectedOptions: [
-                        "protein": ["Chicken"],
-                        "carbs": ["Rice"]
-                    ]
-                )
+                selections: StoredRecipeSelections(),
+                ingredientEntries: [
+                    GeneratedIngredient(quantity: "2", name: "boneless chicken breasts", variant: "breast"),
+                    GeneratedIngredient(quantity: "1 cup", name: "jasmine rice"),
+                    GeneratedIngredient(name: "broccoli florets"),
+                    GeneratedIngredient(name: "carrots"),
+                    GeneratedIngredient(quantity: "3 tbsp", name: "teriyaki sauce"),
+                    GeneratedIngredient(quantity: "2", name: "garlic cloves"),
+                    GeneratedIngredient(quantity: "1 tbsp", name: "olive oil")
+                ]
             ),
             SavedRecipe(
                 id: salmonBowlID,
@@ -806,42 +802,16 @@ private struct IngredientGraphNodeBubble: View {
                 updatedAt: .now,
                 fileName: "two.md",
                 isBlank: false,
-                selections: StoredRecipeSelections(
-                    selectedOptions: [
-                        "protein": ["Salmon"],
-                        "carbs": ["Rice"]
-                    ]
-                )
+                selections: StoredRecipeSelections(),
+                ingredientEntries: [
+                    GeneratedIngredient(name: "salmon fillets"),
+                    GeneratedIngredient(quantity: "1 cup", name: "cooked rice"),
+                    GeneratedIngredient(name: "broccoli"),
+                    GeneratedIngredient(name: "garlic cloves"),
+                    GeneratedIngredient(name: "lemon")
+                ]
             )
-        ],
-        recipeMarkdown: { recipe in
-            switch recipe.id {
-            case chickenBowlID:
-                """
-                ## Ingredients
-
-                - 2 boneless chicken breasts
-                - 1 cup jasmine rice
-                - 2 cups broccoli florets
-                - 2 carrots, sliced
-                - 3 tbsp teriyaki sauce
-                - 2 cloves garlic, minced
-                - 1 tbsp olive oil
-                """
-            case salmonBowlID:
-                """
-                ## Ingredients
-
-                - 2 salmon fillets
-                - 1 cup cooked rice
-                - 1 head broccoli, chopped
-                - 3 cloves garlic
-                - 1 lemon
-                """
-            default:
-                nil
-            }
-        }
+        ]
     )
     .frame(width: 560, height: 520)
     .padding()

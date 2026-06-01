@@ -450,10 +450,12 @@ final class RecipeBuilderViewModel {
                 recipe: recipe,
                 framework: framework
             )
-            currentRecipe = recipe
-            setRecipeMarkdown(renderedMarkdown)
+            var committedRecipe = recipe
+            committedRecipe.syncIngredientsFromEntries()
+            currentRecipe = committedRecipe
+            setRecipeMarkdown(renderedMarkdown, structuredRecipe: committedRecipe)
             lastGeneratedMakeup = selections.ingredientMakeup
-            onRecipeGenerated?(recipe, renderedMarkdown)
+            onRecipeGenerated?(committedRecipe, renderedMarkdown)
             isGenerating = false
         } catch {
             guard requestID == generationRequestID, !Self.isBenignCancellation(error) else {
@@ -530,14 +532,42 @@ final class RecipeBuilderViewModel {
         }
     }
 
-    func updateRecipeMarkdown(_ markdown: String) {
+    func updateRecipeMarkdown(
+        _ markdown: String,
+        preservedIngredientEntries: [GeneratedIngredient] = []
+    ) {
         recipeMarkdown = markdown
-        currentRecipe = RecipeMarkdownRecipeParser.parse(markdown, framework: framework)
+        guard var parsed = RecipeMarkdownRecipeParser.parse(markdown, framework: framework) else {
+            onRecipeMarkdownChanged?(markdown)
+            return
+        }
+
+        let preserved = GeneratedIngredient.sanitized(preservedIngredientEntries)
+        let inMemory = GeneratedIngredient.sanitized(currentRecipe?.ingredientEntries ?? [])
+        if !preserved.isEmpty {
+            parsed.applyStructuredIngredientEntries(preserved)
+        } else if !inMemory.isEmpty {
+            parsed.applyStructuredIngredientEntries(inMemory)
+        }
+
+        currentRecipe = parsed
         onRecipeMarkdownChanged?(markdown)
     }
 
-    private func setRecipeMarkdown(_ markdown: String) {
-        updateRecipeMarkdown(markdown)
+    private func setRecipeMarkdown(_ markdown: String, structuredRecipe: GeneratedRecipe? = nil) {
+        recipeMarkdown = markdown
+        guard var parsed = RecipeMarkdownRecipeParser.parse(markdown, framework: framework) else {
+            onRecipeMarkdownChanged?(markdown)
+            return
+        }
+
+        if let structuredRecipe,
+           !GeneratedIngredient.sanitized(structuredRecipe.ingredientEntries).isEmpty {
+            parsed.applyStructuredIngredientEntries(structuredRecipe.ingredientEntries)
+        }
+
+        currentRecipe = parsed
+        onRecipeMarkdownChanged?(markdown)
     }
 
     private static func recipe(
@@ -555,10 +585,12 @@ final class RecipeBuilderViewModel {
             framework: framework
         )
 
-        currentRecipe = recipe
-        setRecipeMarkdown(renderedMarkdown)
+        var committedRecipe = recipe
+        committedRecipe.syncIngredientsFromEntries()
+        currentRecipe = committedRecipe
+        setRecipeMarkdown(renderedMarkdown, structuredRecipe: committedRecipe)
         lastGeneratedMakeup = selections.ingredientMakeup
-        onRecipeGenerated?(recipe, renderedMarkdown)
+        onRecipeGenerated?(committedRecipe, renderedMarkdown)
     }
 
     private func syncPreviewMessage() {
@@ -581,11 +613,15 @@ final class RecipeBuilderViewModel {
         }
         lastStreamRenderInstant = now
 
+        var recipeForRender = partialRecipe
+        recipeForRender.syncIngredientsFromEntries()
+
         setRecipeMarkdown(
             RecipeMarkdownRenderer.render(
-                recipe: partialRecipe,
+                recipe: recipeForRender,
                 framework: framework
-            )
+            ),
+            structuredRecipe: recipeForRender
         )
     }
 
