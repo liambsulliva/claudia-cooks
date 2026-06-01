@@ -10,15 +10,27 @@ import WebKit
 struct FramedMarkdownPreview: View {
     let markdown: String
     let framework: RecipeFramework
+    var pendingDiff: RecipeEditPendingDiff? = nil
     var isInteractive: Bool = true
-    var onMarkdownChange: ((String) -> Void)?
+    var onMarkdownChange: ((String) -> Void)? = nil
+    var onPendingDiffMarkdownChange: ((PendingDiffMarkdownUpdate) -> Void)? = nil
+    var onAcceptPendingChange: ((UUID) -> Void)? = nil
+    var onDenyPendingChange: ((UUID) -> Void)? = nil
+    var recipeEditUndoManager: UndoManager? = nil
+    var recipeEditReviewUndoRevision: Int = 0
 
     var body: some View {
         MarkdownRecipePreview(
             markdown: markdown,
             framework: framework,
+            pendingDiff: pendingDiff,
             isInteractive: isInteractive,
-            onMarkdownChange: onMarkdownChange
+            onMarkdownChange: onMarkdownChange,
+            onPendingDiffMarkdownChange: onPendingDiffMarkdownChange,
+            onAcceptPendingChange: onAcceptPendingChange,
+            onDenyPendingChange: onDenyPendingChange,
+            recipeEditUndoManager: recipeEditUndoManager,
+            recipeEditReviewUndoRevision: recipeEditReviewUndoRevision
         )
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay {
@@ -35,15 +47,27 @@ struct FramedMarkdownPreview: View {
 struct MarkdownRecipePreview: NSViewRepresentable {
     let markdown: String
     let framework: RecipeFramework
+    var pendingDiff: RecipeEditPendingDiff? = nil
     var isInteractive: Bool = true
-    var onMarkdownChange: ((String) -> Void)?
+    var onMarkdownChange: ((String) -> Void)? = nil
+    var onPendingDiffMarkdownChange: ((PendingDiffMarkdownUpdate) -> Void)? = nil
+    var onAcceptPendingChange: ((UUID) -> Void)? = nil
+    var onDenyPendingChange: ((UUID) -> Void)? = nil
+    var recipeEditUndoManager: UndoManager? = nil
+    var recipeEditReviewUndoRevision: Int = 0
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onMarkdownChange: onMarkdownChange)
+        Coordinator(
+            onMarkdownChange: onMarkdownChange,
+            onPendingDiffMarkdownChange: onPendingDiffMarkdownChange,
+            onAcceptPendingChange: onAcceptPendingChange,
+            onDenyPendingChange: onDenyPendingChange
+        )
     }
 
     func makeNSView(context: Context) -> RecipePreviewWebView {
         let webView = RecipePreviewWebView(messageHandler: context.coordinator)
+        webView.recipeEditUndoManager = recipeEditUndoManager
         webView.navigationDelegate = context.coordinator
         context.coordinator.webView = webView
         load(into: webView, coordinator: context.coordinator)
@@ -52,10 +76,30 @@ struct MarkdownRecipePreview: NSViewRepresentable {
 
     func updateNSView(_ webView: RecipePreviewWebView, context: Context) {
         context.coordinator.onMarkdownChange = onMarkdownChange
+        context.coordinator.onPendingDiffMarkdownChange = onPendingDiffMarkdownChange
+        context.coordinator.onAcceptPendingChange = onAcceptPendingChange
+        context.coordinator.onDenyPendingChange = onDenyPendingChange
+        webView.recipeEditUndoManager = recipeEditUndoManager
 
-        if context.coordinator.lastMarkdown != markdown
-            || context.coordinator.lastFramework != framework
-            || context.coordinator.lastIsInteractive != isInteractive {
+        let pendingDiffFingerprint = pendingDiff.map(PendingDiffDisplayFingerprint.init)
+        let shouldReload: Bool
+
+        let undoRevisionChanged = context.coordinator.lastRecipeEditReviewUndoRevision != recipeEditReviewUndoRevision
+
+        if pendingDiff?.hasChanges == true {
+            shouldReload = undoRevisionChanged
+                || context.coordinator.lastPendingDiffFingerprint != pendingDiffFingerprint
+                || context.coordinator.lastFramework != framework
+                || context.coordinator.lastIsInteractive != isInteractive
+        } else {
+            shouldReload = undoRevisionChanged
+                || context.coordinator.lastMarkdown != markdown
+                || context.coordinator.lastFramework != framework
+                || context.coordinator.lastIsInteractive != isInteractive
+                || context.coordinator.lastPendingDiffFingerprint != nil
+        }
+
+        if shouldReload {
             load(into: webView, coordinator: context.coordinator)
         } else {
             webView.prepareInlineScrolling()
@@ -75,11 +119,25 @@ struct MarkdownRecipePreview: NSViewRepresentable {
         coordinator.lastMarkdown = markdown
         coordinator.lastFramework = framework
         coordinator.lastIsInteractive = isInteractive
-        let html = RecipeMarkdownDocument.html(
-            markdown: markdown,
-            framework: framework,
-            isInteractive: isInteractive
-        )
+        coordinator.lastPendingDiff = pendingDiff
+        coordinator.lastPendingDiffFingerprint = pendingDiff.map(PendingDiffDisplayFingerprint.init)
+        coordinator.lastRecipeEditReviewUndoRevision = recipeEditReviewUndoRevision
+
+        let html: String
+        if let pendingDiff, pendingDiff.hasChanges {
+            html = RecipeMarkdownDiffRenderer.html(
+                pendingDiff: pendingDiff,
+                framework: framework,
+                isInteractive: isInteractive
+            )
+        } else {
+            html = RecipeMarkdownDocument.html(
+                markdown: markdown,
+                framework: framework,
+                isInteractive: isInteractive
+            )
+        }
+
         webView.loadHTMLString(html, baseURL: nil)
     }
 
@@ -87,30 +145,95 @@ struct MarkdownRecipePreview: NSViewRepresentable {
         var lastMarkdown: String?
         var lastFramework: RecipeFramework?
         var lastIsInteractive = true
+        var lastPendingDiff: RecipeEditPendingDiff?
+        var lastPendingDiffFingerprint: PendingDiffDisplayFingerprint?
+        var lastRecipeEditReviewUndoRevision: Int?
         weak var webView: RecipePreviewWebView?
         var onMarkdownChange: ((String) -> Void)?
+        var onPendingDiffMarkdownChange: ((PendingDiffMarkdownUpdate) -> Void)?
+        var onAcceptPendingChange: ((UUID) -> Void)?
+        var onDenyPendingChange: ((UUID) -> Void)?
 
-        init(onMarkdownChange: ((String) -> Void)?) {
+        init(
+            onMarkdownChange: ((String) -> Void)?,
+            onPendingDiffMarkdownChange: ((PendingDiffMarkdownUpdate) -> Void)?,
+            onAcceptPendingChange: ((UUID) -> Void)?,
+            onDenyPendingChange: ((UUID) -> Void)?
+        ) {
             self.onMarkdownChange = onMarkdownChange
+            self.onPendingDiffMarkdownChange = onPendingDiffMarkdownChange
+            self.onAcceptPendingChange = onAcceptPendingChange
+            self.onDenyPendingChange = onDenyPendingChange
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             guard let preview = webView as? RecipePreviewWebView else { return }
             preview.prepareInlineScrolling()
             preview.syncTypographyToViewport()
+            webView.evaluateJavaScript("window.bindDiffReviewPopovers && window.bindDiffReviewPopovers();", completionHandler: nil)
         }
 
         func userContentController(
             _ userContentController: WKUserContentController,
             didReceive message: WKScriptMessage
         ) {
-            guard message.name == "markdownChange",
-                  let markdown = message.body as? String else {
+            switch message.name {
+            case "markdownChange":
+                guard let payload = message.body as? String else {
+                    return
+                }
+
+                if let data = payload.data(using: .utf8),
+                   let update = try? JSONDecoder().decode(PendingDiffMarkdownUpdate.self, from: data) {
+                    onPendingDiffMarkdownChange?(update)
+                    return
+                }
+
+                lastMarkdown = payload
+                onMarkdownChange?(payload)
+            case "acceptChange":
+                guard let changeIDString = messageBodyString(from: message.body),
+                      let changeID = UUID(uuidString: changeIDString) else {
+                    return
+                }
+
+                dispatchPendingChange(changeID, handler: onAcceptPendingChange)
+            case "denyChange":
+                guard let changeIDString = messageBodyString(from: message.body),
+                      let changeID = UUID(uuidString: changeIDString) else {
+                    return
+                }
+
+                dispatchPendingChange(changeID, handler: onDenyPendingChange)
+            default:
+                return
+            }
+        }
+
+        private func messageBodyString(from body: Any) -> String? {
+            if let string = body as? String {
+                return string
+            }
+
+            if let number = body as? NSNumber {
+                return number.stringValue
+            }
+
+            return nil
+        }
+
+        private func dispatchPendingChange(_ changeID: UUID, handler: ((UUID) -> Void)?) {
+            guard let handler else {
                 return
             }
 
-            lastMarkdown = markdown
-            onMarkdownChange?(markdown)
+            if Thread.isMainThread {
+                handler(changeID)
+            } else {
+                DispatchQueue.main.async {
+                    handler(changeID)
+                }
+            }
         }
     }
 }
@@ -122,10 +245,18 @@ final class RecipePreviewWebView: WKWebView {
     private static let maximumRootFontPoints: CGFloat = 11
     private static let baseRootFontPoints: CGFloat = 10
 
+    weak var recipeEditUndoManager: UndoManager?
+
+    override var undoManager: UndoManager? {
+        recipeEditUndoManager ?? super.undoManager
+    }
+
     init(messageHandler: WKScriptMessageHandler) {
         let configuration = WKWebViewConfiguration()
         configuration.suppressesIncrementalRendering = true
         configuration.userContentController.add(messageHandler, name: "markdownChange")
+        configuration.userContentController.add(messageHandler, name: "acceptChange")
+        configuration.userContentController.add(messageHandler, name: "denyChange")
         super.init(frame: .zero, configuration: configuration)
         configure()
     }
@@ -138,6 +269,43 @@ final class RecipePreviewWebView: WKWebView {
     override var acceptsFirstResponder: Bool { true }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if handleRecipeEditUndoKeyEquivalent(event) {
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+
+    @discardableResult
+    private func performRecipeEditUndo() -> Bool {
+        guard let recipeEditUndoManager, recipeEditUndoManager.canUndo else {
+            return false
+        }
+        recipeEditUndoManager.undo()
+        return true
+    }
+
+    @discardableResult
+    private func performRecipeEditRedo() -> Bool {
+        guard let recipeEditUndoManager, recipeEditUndoManager.canRedo else {
+            return false
+        }
+        recipeEditUndoManager.redo()
+        return true
+    }
+
+    private func handleRecipeEditUndoKeyEquivalent(_ event: NSEvent) -> Bool {
+        guard event.modifierFlags.contains(.command),
+              event.charactersIgnoringModifiers?.lowercased() == "z" else {
+            return false
+        }
+
+        if event.modifierFlags.contains(.shift) {
+            return performRecipeEditRedo()
+        }
+        return performRecipeEditUndo()
+    }
 
     override func layout() {
         super.layout()

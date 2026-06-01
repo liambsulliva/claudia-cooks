@@ -10,6 +10,7 @@ struct FrameworkBuilderPanel: View {
     @Bindable var viewModel: RecipeBuilderViewModel
     @Binding var openVariantMenu: (category: IngredientCategory, option: String)?
     @State private var draftPrompt = ""
+    @State private var draftEditPrompt = ""
 
     var body: some View {
         ScrollView {
@@ -74,46 +75,102 @@ struct FrameworkBuilderPanel: View {
     private var recipePromptField: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Label("Recipe prompt", systemImage: "sparkles")
+                Label(promptTitle, systemImage: promptIcon)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.secondary)
 
                 Spacer()
 
-                Button("Generate", action: submitRecipePrompt)
+                Button(promptButtonTitle, action: submitPrompt)
                     .buttonStyle(.glassProminent)
                     .buttonBorderShape(.capsule)
                     .controlSize(.small)
-                    .disabled(!canSubmitRecipePrompt)
+                    .disabled(!canSubmitPrompt)
             }
 
             TextField(
-                "Describe what you want to cook, or pick ingredients below…",
-                text: $draftPrompt,
+                promptPlaceholder,
+                text: promptBinding,
                 axis: .vertical
             )
             .textFieldStyle(.plain)
             .lineLimit(3...8)
-            .onSubmit(submitRecipePrompt)
+            .onSubmit(submitPrompt)
             .onKeyPress(.return, phases: .down) { _ in
-                submitRecipePrompt()
+                submitPrompt()
                 return .handled
             }
             .padding(12)
             .frame(maxWidth: .infinity, minHeight: 88, alignment: .topLeading)
             .background(.background, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .disabled(viewModel.isGenerating)
 
-            Text("Press Return or click Generate to run the model.")
+            Text(promptHelpText)
                 .font(.caption)
                 .foregroundStyle(.tertiary)
         }
     }
 
-    private var canSubmitRecipePrompt: Bool {
-        !draftPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    private var isEditingGeneratedRecipe: Bool {
+        viewModel.canEditGeneratedRecipe
     }
 
-    private func submitRecipePrompt() {
+    private var promptTitle: String {
+        isEditingGeneratedRecipe ? "Edit recipe" : "Recipe prompt"
+    }
+
+    private var promptIcon: String {
+        isEditingGeneratedRecipe ? "wand.and.sparkles" : "sparkles"
+    }
+
+    private var promptButtonTitle: String {
+        isEditingGeneratedRecipe ? "Apply Edit" : "Generate"
+    }
+
+    private var promptPlaceholder: String {
+        if isEditingGeneratedRecipe {
+            return "Describe what to change in the generated recipe…"
+        }
+
+        return "Describe what you want to cook, or pick ingredients below…"
+    }
+
+    private var promptHelpText: String {
+        if isEditingGeneratedRecipe {
+            if viewModel.hasPendingRecipeEdit {
+                return "Review changes on the recipe, edit lines directly, or describe more edits here while pending changes stay visible."
+            }
+
+            return "Press Return or click Apply Edit to patch the recipe with model-generated diff tool calls."
+        }
+
+        return "Press Return or click Generate to run the model."
+    }
+
+    private var promptBinding: Binding<String> {
+        if isEditingGeneratedRecipe {
+            return $draftEditPrompt
+        }
+
+        return $draftPrompt
+    }
+
+    private var canSubmitPrompt: Bool {
+        guard !viewModel.isGenerating else {
+            return false
+        }
+
+        let draft = isEditingGeneratedRecipe ? draftEditPrompt : draftPrompt
+        return !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func submitPrompt() {
+        if isEditingGeneratedRecipe {
+            viewModel.submitRecipeEditPrompt(draftEditPrompt)
+            draftEditPrompt = ""
+            return
+        }
+
         viewModel.submitRecipePrompt(draftPrompt)
     }
 

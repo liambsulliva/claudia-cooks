@@ -17,10 +17,17 @@ struct StackedPaperPreview: View {
     let selectedSheetID: UUID
     let isGenerating: Bool
     let maxPaperHeight: CGFloat
+    var pendingDiff: RecipeEditPendingDiff? = nil
     var menuOverlap: CGFloat = FrameworkBuildScreenLayout.paperOverlapIntoBar
     var topInset: CGFloat = FrameworkBuildScreenLayout.paperStackTopInset
     var containerWidth: CGFloat?
     var onMarkdownChange: ((UUID, String) -> Void)?
+    var onAcceptPendingChange: ((UUID) -> Void)?
+    var onDenyPendingChange: ((UUID) -> Void)?
+    var onPendingDiffMarkdownChange: ((PendingDiffMarkdownUpdate) -> Void)?
+    var recipeEditUndoManager: UndoManager?
+    var recipeEditReviewUndoRevision: Int = 0
+    var onAcceptAllPendingChanges: (() -> Void)?
 
     @State private var hasRaisedStack = false
 
@@ -72,6 +79,13 @@ struct StackedPaperPreview: View {
                         .transition(.opacity.combined(with: .scale(scale: 0.96)))
                         .zIndex(Double(orderedSheets.count) + 1)
                 }
+
+                if pendingDiff?.hasChanges == true {
+                    acceptAllChangesButton
+                        .frame(width: layout.width, height: layout.height, alignment: .topLeading)
+                        .offset(y: -42)
+                        .zIndex(Double(orderedSheets.count) + 2)
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
             .padding(.top, topInset)
@@ -98,10 +112,40 @@ struct StackedPaperPreview: View {
                 FramedMarkdownPreview(
                     markdown: markdown,
                     framework: sheet.framework,
+                    pendingDiff: isActive ? pendingDiff : nil,
                     isInteractive: isActive && !isGenerating,
-                    onMarkdownChange: isActive && !isGenerating ? { updatedMarkdown in
+                    onMarkdownChange: isActive && !isGenerating && pendingDiff == nil ? { updatedMarkdown in
                         onMarkdownChange?(sheet.id, updatedMarkdown)
-                    } : nil
+                    } : nil,
+                    onPendingDiffMarkdownChange: isActive && !isGenerating && pendingDiff != nil ? { update in
+                        onPendingDiffMarkdownChange?(update)
+                    } : nil,
+                    onAcceptPendingChange: isActive ? { changeID in
+                        onAcceptPendingChange?(changeID)
+                    } : nil,
+                    onDenyPendingChange: isActive ? { changeID in
+                        onDenyPendingChange?(changeID)
+                    } : nil,
+                    recipeEditUndoManager: isActive ? recipeEditUndoManager : nil,
+                    recipeEditReviewUndoRevision: recipeEditReviewUndoRevision
+                )
+            } else if isActive, let pendingDiff, pendingDiff.hasChanges {
+                FramedMarkdownPreview(
+                    markdown: "",
+                    framework: sheet.framework,
+                    pendingDiff: pendingDiff,
+                    isInteractive: !isGenerating,
+                    onPendingDiffMarkdownChange: !isGenerating ? { update in
+                        onPendingDiffMarkdownChange?(update)
+                    } : nil,
+                    onAcceptPendingChange: { changeID in
+                        onAcceptPendingChange?(changeID)
+                    },
+                    onDenyPendingChange: { changeID in
+                        onDenyPendingChange?(changeID)
+                    },
+                    recipeEditUndoManager: recipeEditUndoManager,
+                    recipeEditReviewUndoRevision: recipeEditReviewUndoRevision
                 )
             } else {
                 FramedBlankPagePreview(framework: sheet.framework)
@@ -141,6 +185,16 @@ struct StackedPaperPreview: View {
                 Capsule()
                     .strokeBorder(.separator.opacity(0.35), lineWidth: 1)
             }
+    }
+
+    private var acceptAllChangesButton: some View {
+        Button(action: { onAcceptAllPendingChanges?() }) {
+            Label("Accept All Changes", systemImage: "checkmark.circle.fill")
+                .font(.caption.weight(.semibold))
+        }
+        .buttonStyle(.glassProminent)
+        .buttonBorderShape(.capsule)
+        .controlSize(.small)
     }
 
     private var stackAnimationKey: String {

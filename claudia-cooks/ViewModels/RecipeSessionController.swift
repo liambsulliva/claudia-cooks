@@ -67,8 +67,17 @@ final class RecipeSessionController {
     }
 
     func ensureBlankSession(
+        libraryStore: RecipeLibraryStore
+    ) {
+        ensureBlankSession(
+            libraryStore: libraryStore,
+            selections: RecipeSelections()
+        )
+    }
+
+    func ensureBlankSession(
         libraryStore: RecipeLibraryStore,
-        selections: RecipeSelections = RecipeSelections()
+        selections: RecipeSelections
     ) {
         libraryStore.ensureBlankSession(
             sessionID: sessionID,
@@ -81,12 +90,16 @@ final class RecipeSessionController {
         _ recipe: GeneratedRecipe,
         recipeMarkdown: String,
         selections: RecipeSelections,
+        recipeID: UUID? = nil,
+        framework activeFramework: RecipeFramework? = nil,
         libraryStore: RecipeLibraryStore
     ) {
+        let destinationRecipeID = recipeID ?? sessionID
+
         libraryStore.upsert(
-            sessionID: sessionID,
+            sessionID: destinationRecipeID,
             title: recipe.title,
-            framework: framework,
+            framework: activeFramework ?? framework,
             recipeMarkdown: recipeMarkdown,
             selections: selections
         )

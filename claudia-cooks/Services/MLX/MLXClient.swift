@@ -148,6 +148,73 @@ struct MLXClient: Sendable {
         return recipe
     }
 
+    func editRecipe(
+        _ recipe: GeneratedRecipe,
+        framework: RecipeFramework,
+        editPrompt: String
+    ) async throws -> RecipeEditPatchResult {
+        guard let modelName = await resolvedGenerationModel() else {
+            throw MLXClientError.modelNotFound(activeModel)
+        }
+
+        let container = try await modelCache.container(
+            modelName: modelName,
+            configuration: configuration,
+            progressHandler: nil
+        )
+
+        let session = ChatSession(
+            container,
+            instructions: recipeEditSystemPrompt,
+            generateParameters: GenerateParameters(
+                maxTokens: 700,
+                temperature: 0.1,
+                topP: 0.9,
+                repetitionPenalty: 1.05
+            ),
+            additionalContext: ["enable_thinking": false],
+            tools: recipeEditToolSchemas
+        )
+
+        var response = ""
+        var toolCalls: [RecipeEditToolCall] = []
+        for try await generation in session.streamDetails(
+            to: recipeEditUserPrompt(
+                recipe: recipe,
+                framework: framework,
+                editPrompt: editPrompt
+            ),
+            images: [],
+            videos: []
+        ) {
+            switch generation {
+            case .chunk(let text):
+                response += text
+            case .toolCall(let toolCall):
+                if let editToolCall = recipeEditToolCall(from: toolCall) {
+                    toolCalls.append(editToolCall)
+                }
+            case .info:
+                break
+            }
+        }
+
+        if toolCalls.isEmpty {
+            toolCalls = RecipeEditToolCall.decodeAssistantResponse(response) ?? []
+        }
+
+        guard !toolCalls.isEmpty else {
+            throw MLXClientError.invalidRecipeEditPayload
+        }
+
+        let patch = RecipeEditToolCallApplier.apply(toolCalls, to: recipe)
+        guard !patch.changes.isEmpty, patch.recipe.hasMinimumRecipeContent else {
+            throw MLXClientError.invalidRecipeEditPayload
+        }
+
+        return patch
+    }
+
     private func streamChatResponse(
         container: ModelContainer,
         instructions: String,
@@ -375,6 +442,127 @@ struct MLXClient: Sendable {
         """
     }
 
+    private var recipeEditSystemPrompt: String {
+        """
+        You edit generated recipes by calling recipe patch tools.
+        Use tool calls only. Do not reply with a full rewritten recipe, markdown, commentary, or thinking tags.
+
+        Supported tool call names:
+        set_title, set_summary,
+        add_ingredient, replace_ingredient, remove_ingredient,
+        add_step, replace_step, remove_step,
+        add_tip, replace_tip, remove_tip.
+
+        Use 1-based indexes. For replacements and removals, include the original text in "from".
+        For additions and replacements, include the new text in "to".
+        Return only the smallest set of tool calls needed to satisfy the user's edit request.
+        """
+    }
+
+    private var recipeEditToolSchemas: [ToolSpec] {
+        let indexProperty = [
+            "type": "integer",
+            "description": "1-based position in the recipe section."
+        ] as [String: any Sendable]
+        let fromProperty = [
+            "type": "string",
+            "description": "The exact original text being replaced or removed."
+        ] as [String: any Sendable]
+        let toProperty = [
+            "type": "string",
+            "description": "The new text to add or replace with."
+        ] as [String: any Sendable]
+
+        return [
+            recipeEditToolSchema(
+                name: "set_title",
+                description: "Replace the recipe title.",
+                properties: ["to": toProperty],
+                required: ["to"]
+            ),
+            recipeEditToolSchema(
+                name: "set_summary",
+                description: "Replace the recipe summary.",
+                properties: ["to": toProperty],
+                required: ["to"]
+            ),
+            recipeEditToolSchema(
+                name: "add_ingredient",
+                description: "Add an ingredient line.",
+                properties: ["index": indexProperty, "to": toProperty],
+                required: ["to"]
+            ),
+            recipeEditToolSchema(
+                name: "replace_ingredient",
+                description: "Replace an existing ingredient line.",
+                properties: ["index": indexProperty, "from": fromProperty, "to": toProperty],
+                required: ["to"]
+            ),
+            recipeEditToolSchema(
+                name: "remove_ingredient",
+                description: "Remove an ingredient line.",
+                properties: ["index": indexProperty, "from": fromProperty],
+                required: []
+            ),
+            recipeEditToolSchema(
+                name: "add_step",
+                description: "Add a recipe step.",
+                properties: ["index": indexProperty, "to": toProperty],
+                required: ["to"]
+            ),
+            recipeEditToolSchema(
+                name: "replace_step",
+                description: "Replace an existing recipe step.",
+                properties: ["index": indexProperty, "from": fromProperty, "to": toProperty],
+                required: ["to"]
+            ),
+            recipeEditToolSchema(
+                name: "remove_step",
+                description: "Remove a recipe step.",
+                properties: ["index": indexProperty, "from": fromProperty],
+                required: []
+            ),
+            recipeEditToolSchema(
+                name: "add_tip",
+                description: "Add a recipe tip.",
+                properties: ["index": indexProperty, "to": toProperty],
+                required: ["to"]
+            ),
+            recipeEditToolSchema(
+                name: "replace_tip",
+                description: "Replace an existing recipe tip.",
+                properties: ["index": indexProperty, "from": fromProperty, "to": toProperty],
+                required: ["to"]
+            ),
+            recipeEditToolSchema(
+                name: "remove_tip",
+                description: "Remove a recipe tip.",
+                properties: ["index": indexProperty, "from": fromProperty],
+                required: []
+            )
+        ]
+    }
+
+    private func recipeEditToolSchema(
+        name: String,
+        description: String,
+        properties: [String: any Sendable],
+        required: [String]
+    ) -> ToolSpec {
+        [
+            "type": "function",
+            "function": [
+                "name": name,
+                "description": description,
+                "parameters": [
+                    "type": "object",
+                    "properties": properties,
+                    "required": required
+                ] as [String: any Sendable]
+            ] as [String: any Sendable]
+        ] as ToolSpec
+    }
+
     private func sharedPromptSections(
         framework: RecipeFramework,
         selections: RecipeSelections
@@ -450,6 +638,108 @@ struct MLXClient: Sendable {
             """
         )
     }
+
+    private func recipeEditUserPrompt(
+        recipe: GeneratedRecipe,
+        framework: RecipeFramework,
+        editPrompt: String
+    ) -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let recipeJSON = (try? encoder.encode(recipe))
+            .flatMap { String(data: $0, encoding: .utf8) }
+            ?? "{}"
+
+        return """
+        Framework: \(sanitizePromptText(framework.title))
+
+        Current recipe JSON:
+        \(recipeJSON)
+
+        User edit request:
+        \(sanitizePromptText(editPrompt))
+
+        Call the smallest set of recipe edit tools needed to satisfy the request. Do not include unchanged content.
+        """
+    }
+
+    private func recipeEditToolCall(from toolCall: ToolCall) -> RecipeEditToolCall? {
+        let arguments = toolCall.function.arguments
+        let editArguments = RecipeEditToolArguments(
+            index: intArgument(["index", "position"], from: arguments),
+            from: stringArgument(["from", "oldText", "old_text", "before"], from: arguments),
+            to: stringArgument(["to", "newText", "new_text", "after"], from: arguments),
+            text: stringArgument(["text"], from: arguments),
+            value: stringArgument(["value"], from: arguments),
+            title: stringArgument(["title"], from: arguments),
+            summary: stringArgument(["summary"], from: arguments)
+        )
+
+        return RecipeEditToolCall(
+            name: toolCall.function.name,
+            arguments: editArguments
+        )
+    }
+
+    private func stringArgument(
+        _ keys: [String],
+        from arguments: [String: JSONValue]
+    ) -> String? {
+        for key in keys {
+            guard let value = arguments[key] else {
+                continue
+            }
+
+            let stringValue: String?
+            switch value {
+            case .string(let string):
+                stringValue = string
+            case .int(let int):
+                stringValue = String(int)
+            case .double(let double):
+                stringValue = String(double)
+            case .bool(let bool):
+                stringValue = String(bool)
+            default:
+                stringValue = nil
+            }
+
+            if let stringValue {
+                let trimmed = stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    return trimmed
+                }
+            }
+        }
+
+        return nil
+    }
+
+    private func intArgument(
+        _ keys: [String],
+        from arguments: [String: JSONValue]
+    ) -> Int? {
+        for key in keys {
+            guard let value = arguments[key] else {
+                continue
+            }
+
+            switch value {
+            case .int(let int):
+                return int
+            case .double(let double):
+                return Int(double)
+            case .string(let string):
+                if let int = Int(string.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                    return int
+                }
+            default:
+                continue
+            }
+        }
+
+        return nil
+    }
 }
 
 enum MLXAvailability: Sendable, Equatable {
@@ -461,6 +751,7 @@ enum MLXClientError: LocalizedError {
     case invalidModelIdentifier(String)
     case modelNotFound(String)
     case invalidRecipePayload
+    case invalidRecipeEditPayload
     case invalidCategoryPayload
 
     var errorDescription: String? {
@@ -471,6 +762,8 @@ enum MLXClientError: LocalizedError {
             "\(model) is not downloaded yet. Choose a model size to download the MLX model files."
         case .invalidRecipePayload:
             "The recipe JSON from MLX could not be decoded. Try generating again."
+        case .invalidRecipeEditPayload:
+            "The recipe edit from MLX could not be applied. Try a more specific edit request."
         case .invalidCategoryPayload:
             "MLX could not classify one or more ingredients. Try again after the model finishes loading."
         }

@@ -81,6 +81,35 @@ final class RecipeGenerationService {
         }
     }
 
+    func editRecipe(
+        _ recipe: GeneratedRecipe,
+        framework: RecipeFramework,
+        editPrompt: String
+    ) async throws -> RecipeEditPatchResult {
+        if lastAvailability == nil {
+            _ = await refreshAvailability()
+        }
+
+        switch lastAvailability {
+        case .ready:
+            break
+        case .modelNotDownloaded, .none:
+            if let message = lastAvailabilityMessage {
+                throw RecipeGenerationError.unavailable(message)
+            }
+        }
+
+        do {
+            return try await mlx.editRecipe(
+                recipe,
+                framework: framework,
+                editPrompt: editPrompt
+            )
+        } catch let error as MLXClientError {
+            throw RecipeGenerationError.mlx(error)
+        }
+    }
+
     private func message(for status: MLXAvailability) -> String? {
         switch status {
         case .ready:

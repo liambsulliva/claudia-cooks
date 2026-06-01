@@ -210,9 +210,24 @@ struct FrameworkDetailView: View {
             selectedSheetID: session.activeSheetID,
             isGenerating: session.selectedRecipe == nil && viewModel.isGenerating,
             maxPaperHeight: maxPaperHeight,
+            pendingDiff: viewModel.pendingRecipeEdit,
             containerWidth: previewPanelWidth,
             onMarkdownChange: { recipeID, markdown in
                 updateMarkdown(markdown, for: recipeID)
+            },
+            onAcceptPendingChange: { changeID in
+                viewModel.acceptPendingRecipeEditChange(changeID)
+            },
+            onDenyPendingChange: { changeID in
+                viewModel.denyPendingRecipeEditChange(changeID)
+            },
+            onPendingDiffMarkdownChange: { update in
+                viewModel.updateRecipeDuringPendingEdit(update)
+            },
+            recipeEditUndoManager: viewModel.recipeEditUndoManagerForPreview,
+            recipeEditReviewUndoRevision: viewModel.recipeEditReviewUndoRevision,
+            onAcceptAllPendingChanges: {
+                viewModel.acceptAllPendingRecipeEditChanges()
             }
         )
         .background(Color(nsColor: .windowBackgroundColor))
@@ -345,13 +360,12 @@ struct FrameworkDetailView: View {
             hadPersistedGeneratedRecipe: hadPersistedGeneratedRecipe
         )
 
-        guard recipe.id == session.sessionID else {
-            return
-        }
-
         if let markdown = libraryStore.recipeMarkdown(for: recipe), !markdown.isEmpty {
             viewModel.updateRecipeMarkdown(markdown)
-            session.liveRecipeMarkdown = markdown
+
+            if recipe.id == session.sessionID {
+                session.liveRecipeMarkdown = markdown
+            }
         }
     }
 
@@ -378,6 +392,10 @@ struct FrameworkDetailView: View {
         }
 
         viewModel.onRecipeMarkdownChanged = { markdown in
+            guard editingRecipeID == session.sessionID else {
+                return
+            }
+
             session.liveRecipeMarkdown = markdown
         }
 
@@ -398,6 +416,8 @@ struct FrameworkDetailView: View {
                 recipe,
                 recipeMarkdown: recipeMarkdown,
                 selections: viewModel.selections,
+                recipeID: editingRecipeID,
+                framework: activeFramework,
                 libraryStore: libraryStore
             )
         }
