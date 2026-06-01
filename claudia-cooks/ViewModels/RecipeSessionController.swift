@@ -112,9 +112,5 @@ final class RecipeSessionController {
         if selectedRecipe?.id == recipe.id {
             selectedRecipe = nil
         }
-
-        if recipe.id == sessionID {
-            ensureBlankSession(libraryStore: libraryStore)
-        }
     }
 }

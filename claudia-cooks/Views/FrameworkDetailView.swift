@@ -288,13 +288,10 @@ struct FrameworkDetailView: View {
             libraryFolderURL: libraryStore.libraryFolderURL,
             onSelectRecipe: selectRecipe,
             onDeleteRecipe: { recipe in
-                let deletedEditingRecipe = recipe.id == editingRecipeID
+                let affectedCurrentRecipe = recipe.id == editingRecipeID
                 libraryStore.updateSelections(viewModel.selections, for: editingRecipeID)
                 session.deleteRecipe(recipe, libraryStore: libraryStore)
-
-                if deletedEditingRecipe, let sessionRecipe = libraryStore.recipe(for: session.sessionID) {
-                    applyBuilderState(for: sessionRecipe)
-                }
+                handleRecipeDeleted(affectedCurrentRecipe: affectedCurrentRecipe)
             },
             onAddMore: {
                 withAnimation(.easeInOut(duration: 0.18)) {
@@ -320,9 +317,7 @@ struct FrameworkDetailView: View {
 
         guard let updatedRecipe = libraryStore.recipe(for: selectedID) else {
             session.selectedRecipe = nil
-            if let sessionRecipe = libraryStore.recipe(for: session.sessionID) {
-                applyBuilderState(for: sessionRecipe)
-            }
+            handleRecipeDeleted(affectedCurrentRecipe: true)
             return
         }
 
@@ -344,6 +339,35 @@ struct FrameworkDetailView: View {
 
         viewModel.updateRecipeMarkdown(markdown)
         session.liveRecipeMarkdown = markdown
+    }
+
+    private func handleRecipeDeleted(affectedCurrentRecipe: Bool) {
+        guard affectedCurrentRecipe else {
+            return
+        }
+
+        if libraryStore.recipes.isEmpty {
+            resetBuilderToEmptyState()
+            return
+        }
+
+        if let sessionRecipe = libraryStore.recipe(for: session.sessionID) {
+            applyBuilderState(for: sessionRecipe)
+            return
+        }
+
+        if let nextRecipe = libraryStore.recipes.first {
+            selectRecipe(nextRecipe)
+        }
+    }
+
+    private func resetBuilderToEmptyState() {
+        session.selectedRecipe = nil
+        session.liveRecipeMarkdown = ""
+        viewModel.loadRecipeState(
+            selections: RecipeSelections(),
+            hadPersistedGeneratedRecipe: false
+        )
     }
 
     private func selectRecipe(_ recipe: SavedRecipe) {
