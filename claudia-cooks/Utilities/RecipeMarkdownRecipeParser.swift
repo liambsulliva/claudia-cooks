@@ -7,7 +7,7 @@ import Foundation
 
 enum RecipeMarkdownRecipeParser {
     static func parse(_ markdown: String, framework: RecipeFramework) -> GeneratedRecipe? {
-        let lines = markdown.components(separatedBy: .newlines)
+        let lines = RecipeMarkdownFrontmatter.renderableBody(markdown).components(separatedBy: .newlines)
         var title = ""
         var summaryLines: [String] = []
         var sections: [RecipeSection: [String]] = [:]

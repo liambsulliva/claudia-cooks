@@ -11,7 +11,7 @@ enum RecipeMarkdownDocument {
         framework: RecipeFramework,
         isInteractive: Bool = true
     ) -> String {
-        let body = MarkdownToHTML.convert(markdown)
+        let body = MarkdownToHTML.convert(RecipeMarkdownFrontmatter.renderableBody(markdown))
         return documentHTML(
             body: body,
             framework: framework,

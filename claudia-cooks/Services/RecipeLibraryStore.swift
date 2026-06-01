@@ -53,23 +53,24 @@ final class RecipeLibraryStore {
         }
 
         let now = Date()
-        recipes.insert(
-            SavedRecipe(
-                id: sessionID,
-                title: "Blank Page",
-                framework: framework,
-                createdAt: now,
-                updatedAt: now,
-                fileName: "",
-                isBlank: true,
-                selections: selections.stored
-            ),
-            at: 0
+        let recipe = SavedRecipe(
+            id: sessionID,
+            title: "Blank Page",
+            framework: framework,
+            createdAt: now,
+            updatedAt: now,
+            fileName: "",
+            isBlank: true,
+            selections: selections.stored
         )
 
         do {
             try ensureLibraryDirectory()
-            try persistManifest()
+            let fileName = try writeRecipeDocument(recipe, body: "")
+            var persistedRecipe = recipe
+            persistedRecipe.fileName = fileName
+            recipes.insert(persistedRecipe, at: 0)
+            markdownCache[sessionID] = ""
             errorMessage = nil
         } catch {
             errorMessage = "Recipe library could not save this file."
@@ -83,18 +84,15 @@ final class RecipeLibraryStore {
 
         do {
             try ensureLibraryDirectory()
+            let body = RecipeMarkdownFrontmatter.renderableBody(markdown)
+            syncTitleFromMarkdown(body, at: index)
 
-            let fileName = recipes[index].fileName.isEmpty
-                ? "\(recipeID.uuidString).md"
-                : recipes[index].fileName
-            let fileURL = libraryURL.appendingPathComponent(fileName, isDirectory: false)
-            try markdown.write(to: fileURL, atomically: true, encoding: .utf8)
-
-            recipes[index].fileName = fileName
             recipes[index].isBlank = false
             recipes[index].updatedAt = Date()
-            markdownCache[recipeID] = markdown
-            try persistManifest()
+
+            let fileName = try writeRecipeDocument(recipes[index], body: body)
+            recipes[index].fileName = fileName
+            markdownCache[recipeID] = body
             errorMessage = nil
         } catch {
             errorMessage = "Recipe library could not save this recipe."
@@ -109,18 +107,13 @@ final class RecipeLibraryStore {
         do {
             try ensureLibraryDirectory()
 
-            let recipe = recipes[index]
-            if let fileURL = fileURL(for: recipe),
-               fileManager.fileExists(atPath: fileURL.path) {
-                try fileManager.removeItem(at: fileURL)
-            }
-
-            markdownCache.removeValue(forKey: recipeID)
             recipes[index].title = "Blank Page"
-            recipes[index].fileName = ""
             recipes[index].isBlank = true
             recipes[index].updatedAt = Date()
-            try persistManifest()
+
+            let fileName = try writeRecipeDocument(recipes[index], body: "")
+            recipes[index].fileName = fileName
+            markdownCache[recipeID] = ""
             errorMessage = nil
         } catch {
             errorMessage = "Recipe library could not clear this file."
@@ -133,9 +126,13 @@ final class RecipeLibraryStore {
         }
 
         recipes[index].selections = selections.stored
+        recipes[index].updatedAt = Date()
 
         do {
-            try persistManifest()
+            try ensureLibraryDirectory()
+            let body = try recipeBody(for: recipes[index])
+            let fileName = try writeRecipeDocument(recipes[index], body: body)
+            recipes[index].fileName = fileName
             errorMessage = nil
         } catch {
             errorMessage = "Recipe library could not save ingredient selections."
@@ -153,15 +150,14 @@ final class RecipeLibraryStore {
             try ensureLibraryDirectory()
 
             let now = Date()
-            let fileName = "\(sessionID.uuidString).md"
-            let fileURL = libraryURL.appendingPathComponent(fileName, isDirectory: false)
-            try recipeMarkdown.write(to: fileURL, atomically: true, encoding: .utf8)
+            let existingIndex = recipes.firstIndex(where: { $0.id == sessionID })
+            let previousFileName = existingIndex.map { recipes[$0].fileName } ?? ""
+            let body = RecipeMarkdownFrontmatter.renderableBody(recipeMarkdown)
 
-            if let existingIndex = recipes.firstIndex(where: { $0.id == sessionID }) {
+            if let existingIndex {
                 recipes[existingIndex].title = title
                 recipes[existingIndex].framework = framework
                 recipes[existingIndex].updatedAt = now
-                recipes[existingIndex].fileName = fileName
                 recipes[existingIndex].isBlank = false
                 recipes[existingIndex].selections = selections.stored
             } else {
@@ -172,16 +168,21 @@ final class RecipeLibraryStore {
                         framework: framework,
                         createdAt: now,
                         updatedAt: now,
-                        fileName: fileName,
+                        fileName: previousFileName,
                         isBlank: false,
                         selections: selections.stored
                     )
                 )
             }
 
+            guard let index = recipes.firstIndex(where: { $0.id == sessionID }) else {
+                return
+            }
+
+            let fileName = try writeRecipeDocument(recipes[index], body: body)
+            recipes[index].fileName = fileName
             recipes.sort { $0.createdAt > $1.createdAt }
-            markdownCache[sessionID] = recipeMarkdown
-            try persistManifest()
+            markdownCache[sessionID] = body
             errorMessage = nil
         } catch {
             errorMessage = "Recipe library could not save this recipe."
@@ -189,7 +190,7 @@ final class RecipeLibraryStore {
     }
 
     func fileURL(for recipe: SavedRecipe) -> URL? {
-        guard !recipe.isBlank, !recipe.fileName.isEmpty else {
+        guard !recipe.fileName.isEmpty else {
             return nil
         }
 
@@ -204,7 +205,6 @@ final class RecipeLibraryStore {
 
             markdownCache.removeValue(forKey: recipe.id)
             recipes.removeAll { $0.id == recipe.id }
-            try persistManifest()
             errorMessage = nil
         } catch {
             errorMessage = "Recipe library could not delete this file."
@@ -217,19 +217,18 @@ final class RecipeLibraryStore {
         }
 
         if let cachedMarkdown = markdownCache[recipe.id] {
-            return cachedMarkdown
+            return cachedMarkdown.isEmpty ? nil : cachedMarkdown
         }
 
-        let fileURL = libraryURL.appendingPathComponent(recipe.fileName, isDirectory: false)
-        guard let markdown = try? String(contentsOf: fileURL, encoding: .utf8) else {
+        guard let body = try? recipeBody(for: recipe), !body.isEmpty else {
             return nil
         }
 
-        markdownCache[recipe.id] = markdown
-        return markdown
+        markdownCache[recipe.id] = body
+        return body
     }
 
-    /// Reloads manifest metadata and markdown caches after external file changes.
+    /// Reloads recipe metadata and markdown caches after external file changes.
     func syncFromDisk() {
         guard !isSyncingFromDisk else {
             return
@@ -239,14 +238,14 @@ final class RecipeLibraryStore {
         defer { isSyncingFromDisk = false }
 
         let previousRecipeIDs = Set(recipes.map(\.id))
-        reloadRecipesFromManifest()
+        reloadRecipesFromDisk()
 
         let removedRecipeIDs = previousRecipeIDs.subtracting(recipes.map(\.id))
         for recipeID in removedRecipeIDs {
             markdownCache.removeValue(forKey: recipeID)
         }
 
-        for recipe in recipes where !recipe.isBlank && !recipe.fileName.isEmpty {
+        for recipe in recipes where !recipe.isBlank {
             markdownCache.removeValue(forKey: recipe.id)
         }
     }
@@ -254,34 +253,136 @@ final class RecipeLibraryStore {
     private func load() {
         do {
             try ensureLibraryDirectory()
-            reloadRecipesFromManifest()
+            try migrateManifestToFrontmatterIfNeeded()
+            reloadRecipesFromDisk()
+            try migrateLegacyFileNamesIfNeeded()
         } catch {
             recipes = []
             errorMessage = "Recipe library could not be loaded."
         }
     }
 
-    private func reloadRecipesFromManifest() {
-        guard fileManager.fileExists(atPath: manifestURL.path) else {
+    private func reloadRecipesFromDisk() {
+        guard let fileNames = try? fileManager.contentsOfDirectory(atPath: libraryURL.path) else {
             recipes = []
             markdownCache.removeAll()
-            errorMessage = nil
+            errorMessage = "Recipe library could not be loaded."
             return
         }
 
-        do {
-            let data = try Data(contentsOf: manifestURL)
-            let decodedRecipes = try JSONDecoder().decode([SavedRecipe].self, from: data)
-                .sorted { $0.createdAt > $1.createdAt }
+        var loadedRecipes: [SavedRecipe] = []
 
-            if decodedRecipes != recipes {
-                recipes = decodedRecipes
+        for fileName in fileNames where fileName.hasSuffix(".md") {
+            let fileURL = libraryURL.appendingPathComponent(fileName, isDirectory: false)
+            guard let contents = try? String(contentsOf: fileURL, encoding: .utf8) else {
+                continue
             }
 
-            errorMessage = nil
-        } catch {
-            errorMessage = "Recipe library could not be loaded."
+            if let recipe = savedRecipe(fromFileName: fileName, contents: contents, fileURL: fileURL) {
+                loadedRecipes.append(recipe)
+            }
         }
+
+        let sortedRecipes = loadedRecipes.sorted { $0.createdAt > $1.createdAt }
+        if sortedRecipes != recipes {
+            recipes = sortedRecipes
+        }
+
+        errorMessage = nil
+    }
+
+    private func savedRecipe(
+        fromFileName fileName: String,
+        contents: String,
+        fileURL: URL
+    ) -> SavedRecipe? {
+        let (metadata, body) = RecipeMarkdownFrontmatter.split(contents)
+
+        if let metadata {
+            var recipe = metadata.savedRecipe(fileName: fileName)
+            if !metadata.isBlank,
+               let parsedRecipe = RecipeMarkdownRecipeParser.parse(body, framework: recipe.framework) {
+                recipe.title = parsedRecipe.title
+            }
+            return recipe
+        }
+
+        return legacySavedRecipe(
+            fromFileName: fileName,
+            body: RecipeMarkdownFrontmatter.renderableBody(contents),
+            fileURL: fileURL
+        )
+    }
+
+    private func legacySavedRecipe(
+        fromFileName fileName: String,
+        body: String,
+        fileURL: URL
+    ) -> SavedRecipe? {
+        let fileDates = (try? fileURL.resourceValues(forKeys: [.creationDateKey, .contentModificationDateKey])) ?? nil
+        let createdAt = fileDates?.creationDate ?? Date()
+        let updatedAt = fileDates?.contentModificationDate ?? createdAt
+
+        let stem = String(fileName.dropLast(3))
+        let recipeID = UUID(uuidString: stem) ?? UUID()
+        let framework: RecipeFramework = .bowl
+        let parsedTitle = RecipeMarkdownRecipeParser.parse(body, framework: framework)?.title
+        let title = parsedTitle ?? stem
+
+        return SavedRecipe(
+            id: recipeID,
+            title: title,
+            framework: framework,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            fileName: fileName,
+            isBlank: body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+            selections: StoredRecipeSelections()
+        )
+    }
+
+    private func migrateManifestToFrontmatterIfNeeded() throws {
+        guard fileManager.fileExists(atPath: manifestURL.path) else {
+            return
+        }
+
+        let data = try Data(contentsOf: manifestURL)
+        let manifestRecipes = try JSONDecoder().decode([SavedRecipe].self, from: data)
+
+        for recipe in manifestRecipes {
+            let body: String
+            if !recipe.fileName.isEmpty {
+                let fileURL = libraryURL.appendingPathComponent(recipe.fileName, isDirectory: false)
+                if fileManager.fileExists(atPath: fileURL.path),
+                   let contents = try? String(contentsOf: fileURL, encoding: .utf8) {
+                    body = RecipeMarkdownFrontmatter.renderableBody(contents)
+                } else {
+                    body = ""
+                }
+            } else {
+                body = ""
+            }
+
+            _ = try writeRecipeDocument(recipe, body: body)
+        }
+
+        for fileName in try fileManager.contentsOfDirectory(atPath: libraryURL.path) where fileName.hasSuffix(".md") {
+            let recipeID = manifestRecipes.first(where: { $0.fileName == fileName })?.id
+            if recipeID == nil, let contents = try? String(
+                contentsOf: libraryURL.appendingPathComponent(fileName),
+                encoding: .utf8
+            ),
+               RecipeMarkdownFrontmatter.split(contents).metadata == nil,
+               let legacyRecipe = legacySavedRecipe(
+                   fromFileName: fileName,
+                   body: RecipeMarkdownFrontmatter.renderableBody(contents),
+                   fileURL: libraryURL.appendingPathComponent(fileName)
+               ) {
+                _ = try writeRecipeDocument(legacyRecipe, body: RecipeMarkdownFrontmatter.renderableBody(contents))
+            }
+        }
+
+        try fileManager.removeItem(at: manifestURL)
     }
 
     private func startWatchingLibraryDirectory() {
@@ -311,14 +412,120 @@ final class RecipeLibraryStore {
         }
     }
 
-    private func persistManifest() throws {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let data = try encoder.encode(recipes)
-        try data.write(to: manifestURL, options: .atomic)
-    }
-
     private func ensureLibraryDirectory() throws {
         try fileManager.createDirectory(at: libraryURL, withIntermediateDirectories: true)
+    }
+
+    private func occupiedFileNames(excludingRecipeID: UUID? = nil) -> Set<String> {
+        Set(
+            recipes
+                .filter { recipe in
+                    recipe.id != excludingRecipeID && !recipe.fileName.isEmpty
+                }
+                .map(\.fileName)
+        )
+    }
+
+    private func syncTitleFromMarkdown(_ markdown: String, at index: Int) {
+        guard let parsedRecipe = RecipeMarkdownRecipeParser.parse(
+            markdown,
+            framework: recipes[index].framework
+        ) else {
+            return
+        }
+
+        recipes[index].title = parsedRecipe.title
+    }
+
+    @discardableResult
+    private func writeRecipeDocument(_ recipe: SavedRecipe, body: String) throws -> String {
+        let preferredFileName = RecipeLibraryFileNaming.fileName(
+            forTitle: recipe.title,
+            occupiedFileNames: occupiedFileNames(excludingRecipeID: recipe.id)
+        )
+
+        var fileName = recipe.fileName
+        if fileName.isEmpty {
+            fileName = preferredFileName
+        } else if fileName != preferredFileName {
+            try renameRecipeFileOnDisk(from: fileName, to: preferredFileName)
+            fileName = preferredFileName
+        }
+
+        let fileURL = libraryURL.appendingPathComponent(fileName, isDirectory: false)
+        let document = RecipeMarkdownFrontmatter.document(for: recipe, body: body)
+        try document.write(to: fileURL, atomically: true, encoding: .utf8)
+        return fileName
+    }
+
+    private func recipeBody(for recipe: SavedRecipe) throws -> String {
+        if let cachedBody = markdownCache[recipe.id] {
+            return cachedBody
+        }
+
+        guard let fileURL = fileURL(for: recipe) else {
+            return ""
+        }
+
+        let contents = try String(contentsOf: fileURL, encoding: .utf8)
+        return RecipeMarkdownFrontmatter.renderableBody(contents)
+    }
+
+    private func renameRecipeFileOnDisk(from oldFileName: String, to newFileName: String) throws {
+        guard oldFileName != newFileName else {
+            return
+        }
+
+        let oldURL = libraryURL.appendingPathComponent(oldFileName, isDirectory: false)
+        let newURL = libraryURL.appendingPathComponent(newFileName, isDirectory: false)
+
+        guard fileManager.fileExists(atPath: oldURL.path) else {
+            return
+        }
+
+        if fileManager.fileExists(atPath: newURL.path) {
+            try fileManager.removeItem(at: newURL)
+        }
+
+        try fileManager.moveItem(at: oldURL, to: newURL)
+    }
+
+    private func migrateLegacyFileNamesIfNeeded() throws {
+        var didMigrate = false
+
+        for index in recipes.indices {
+            let recipe = recipes[index]
+            guard !recipe.fileName.isEmpty else {
+                continue
+            }
+
+            let shouldMigrate = RecipeLibraryFileNaming.isUUIDBasedFileName(recipe.fileName)
+                || recipe.fileName != RecipeLibraryFileNaming.preferredFileName(
+                    for: recipe,
+                    occupiedFileNames: occupiedFileNames(excludingRecipeID: recipe.id)
+                )
+
+            guard shouldMigrate else {
+                continue
+            }
+
+            let newFileName = RecipeLibraryFileNaming.fileName(
+                forTitle: recipe.title,
+                occupiedFileNames: occupiedFileNames(excludingRecipeID: recipe.id)
+            )
+
+            if recipe.fileName != newFileName {
+                try renameRecipeFileOnDisk(from: recipe.fileName, to: newFileName)
+                recipes[index].fileName = newFileName
+                if let body = try? recipeBody(for: recipes[index]) {
+                    _ = try writeRecipeDocument(recipes[index], body: body)
+                }
+                didMigrate = true
+            }
+        }
+
+        if didMigrate {
+            reloadRecipesFromDisk()
+        }
     }
 }

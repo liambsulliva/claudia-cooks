@@ -33,14 +33,15 @@ enum RecipeMarkdownIngredientsParser {
 
     /// Bullet lines from the generated recipe's `## Ingredients` section.
     static func ingredients(from markdown: String) -> [String] {
-        let stepsStart = stepsSectionStart(in: markdown)
+        let documentBody = RecipeMarkdownFrontmatter.renderableBody(markdown)
+        let stepsStart = stepsSectionStart(in: documentBody)
         var results: [String] = []
         var inIngredientsSection = false
-        var lineStart = markdown.startIndex
+        var lineStart = documentBody.startIndex
 
-        while lineStart < markdown.endIndex {
-            let lineEnd = markdown[lineStart...].firstIndex(of: "\n") ?? markdown.endIndex
-            let rawLine = String(markdown[lineStart..<lineEnd])
+        while lineStart < documentBody.endIndex {
+            let lineEnd = documentBody[lineStart...].firstIndex(of: "\n") ?? documentBody.endIndex
+            let rawLine = String(documentBody[lineStart..<lineEnd])
             let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
 
             if !line.isEmpty {
@@ -64,7 +65,7 @@ enum RecipeMarkdownIngredientsParser {
                 }
             }
 
-            lineStart = lineEnd < markdown.endIndex ? markdown.index(after: lineEnd) : markdown.endIndex
+            lineStart = lineEnd < documentBody.endIndex ? documentBody.index(after: lineEnd) : documentBody.endIndex
         }
 
         return results

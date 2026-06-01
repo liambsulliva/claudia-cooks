@@ -109,7 +109,7 @@ struct FileSystemSection: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            Label("File System", systemImage: "folder.fill")
+            Label("Cabinet", systemImage: "folder.fill")
                 .font(.headline)
 
             Spacer()
@@ -205,6 +205,7 @@ struct FileSystemSection: View {
         .onTapGesture {
             onSelectRecipe(recipe)
         }
+        .recipeFileDragSource(fileURL: fileURL(recipe), isEnabled: !isBlank(recipe))
         .contextMenu {
             Button {
                 showInFinder(recipe)
@@ -271,6 +272,19 @@ private struct MarkdownThumbnailView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(.background.opacity(0.65))
             }
+        }
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func recipeFileDragSource(fileURL: URL?, isEnabled: Bool) -> some View {
+        if isEnabled, let fileURL {
+            onDrag {
+                NSItemProvider(contentsOf: fileURL) ?? NSItemProvider()
+            }
+        } else {
+            self
         }
     }
 }
