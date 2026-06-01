@@ -773,12 +773,12 @@ private struct IngredientGraphNodeBubble: View {
     let chickenBowlID = UUID()
     let salmonBowlID = UUID()
 
-    return IngredientGraphView(
+    IngredientGraphView(
         recipes: [
             SavedRecipe(
                 id: chickenBowlID,
                 title: "Chicken Rice Bowl",
-                framework: .bowl,
+                framework: .bowls,
                 createdAt: .now,
                 updatedAt: .now,
                 fileName: "one.md",
@@ -797,7 +797,7 @@ private struct IngredientGraphNodeBubble: View {
             SavedRecipe(
                 id: salmonBowlID,
                 title: "Salmon Bowl",
-                framework: .bowl,
+                framework: .bowls,
                 createdAt: .now,
                 updatedAt: .now,
                 fileName: "two.md",

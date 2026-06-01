@@ -315,7 +315,7 @@ struct IngredientBentoGrid: View {
     @Previewable @State var openVariantMenu: (category: IngredientCategory, option: String)?
 
     IngredientBentoGrid(
-        categories: RecipeFramework.bowl.applicableCategories,
+        categories: RecipeFramework.bowls.applicableCategories,
         selectedOptions: { category in
             selections.selectedOptions[category, default: []]
         },

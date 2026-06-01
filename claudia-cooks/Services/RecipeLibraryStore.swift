@@ -341,7 +341,7 @@ final class RecipeLibraryStore {
 
         let stem = String(fileName.dropLast(3))
         let recipeID = UUID(uuidString: stem) ?? UUID()
-        let framework: RecipeFramework = .bowl
+        let framework: RecipeFramework = .bowls
         let parsedTitle = RecipeMarkdownRecipeParser.parse(body, framework: framework)?.title
         let title = parsedTitle ?? stem
 

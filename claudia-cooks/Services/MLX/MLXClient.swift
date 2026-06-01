@@ -447,7 +447,9 @@ struct MLXClient: Sendable {
     private func titleSummarySystemPrompt(for framework: RecipeFramework) -> String {
         """
         You are a practical cooking assistant for home cooks.
-        Write a concise recipe title and one-sentence summary for a \(framework.title.lowercased()) recipe from the user's selections.
+        \(framework.mlxCategoryGuidance)
+        Write a concise recipe title and one-sentence summary for a \(framework.title.lowercased()) dish (\(framework.dishExamples)) from the user's selections.
+        The title should sound like a real dish in this category, not a generic list of ingredients.
         Use only the selected ingredients plus common pantry staples such as salt, pepper, oil, water, and vinegar ONLY if applicable.
         Do not invent unavailable specialty ingredients.
         Reply with a single JSON object only. No markdown, no code fences, no commentary, no thinking tags.
@@ -460,7 +462,9 @@ struct MLXClient: Sendable {
     private func ingredientsSystemPrompt(for framework: RecipeFramework) -> String {
         """
         You are a practical cooking assistant for home cooks.
-        Generate the ingredient list for a concise \(framework.title.lowercased()) recipe from the user's selections.
+        \(framework.mlxCategoryGuidance)
+        Generate the ingredient list for a concise \(framework.title.lowercased()) dish (\(framework.dishExamples)) from the user's selections.
+        List amounts appropriate to the dish style (e.g. enough broth for soup, enough bread for handhelds, enough starch for a bowl).
         Use only the selected ingredients plus common pantry staples such as salt, pepper, oil, water, and vinegar ONLY if applicable.
         Do not invent unavailable specialty ingredients.
         Reply with a single JSON object only. No markdown, no code fences, no commentary, no thinking tags.
@@ -477,7 +481,9 @@ struct MLXClient: Sendable {
     private func instructionsSystemPrompt(for framework: RecipeFramework) -> String {
         """
         You are a practical cooking assistant for home cooks.
-        Write clear, safe, realistic cooking instructions for a \(framework.title.lowercased()) recipe.
+        \(framework.mlxCategoryGuidance)
+        Write clear, safe, realistic cooking instructions for a \(framework.title.lowercased()) dish (\(framework.dishExamples)).
+        Steps must follow the techniques and sequencing best suited to this category (e.g. assembly order for handhelds, simmer stages for soups, high-heat workflow for sautés).
         Use the provided ingredient list exactly; do not add new ingredients beyond common pantry staples already listed.
         Reply with a single JSON object only. No markdown, no code fences, no commentary, no thinking tags.
         Required keys: steps, tips.

@@ -29,7 +29,7 @@ PDF is both the **export format** and the **live canvas**. The preview is not a 
 | **Services** | `RecipeGenerationService` → `MLXClient`; `RecipePDFRenderer` + `PDFPageWriter`; `RecipeLibraryStore` for saved recipes. |
 | **MLX** | Configuration, model cache, tokenizer, tier preferences, system load heuristics. |
 
-The app entry point is `ClaudiasCookingApp` → `ContentView`: framework picker, then a navigation stack into the builder for the chosen cooking framework (e.g. skillet, sheet pan).
+The app entry point is `ClaudiasCookingApp` → `ContentView`: framework picker, then a navigation stack into the builder for the chosen cooking framework (Handhelds, Bowls, Soups, Sautés, Braises, or Bakes).
 
 ## Models and dependencies
 

@@ -242,9 +242,9 @@ struct StackedPaperPreview: View {
 
     StackedPaperPreview(
         sheets: [
-            PaperSheet(id: UUID(), markdown: nil, isBlank: true, framework: .bowl),
-            PaperSheet(id: UUID(), markdown: nil, isBlank: true, framework: .soup),
-            PaperSheet(id: selectedID, markdown: nil, isBlank: true, framework: .sandwich)
+            PaperSheet(id: UUID(), markdown: nil, isBlank: true, framework: .bowls),
+            PaperSheet(id: UUID(), markdown: nil, isBlank: true, framework: .soups),
+            PaperSheet(id: selectedID, markdown: nil, isBlank: true, framework: .handhelds)
         ],
         selectedSheetID: selectedID,
         isGenerating: true,

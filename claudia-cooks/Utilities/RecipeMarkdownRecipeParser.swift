@@ -74,7 +74,8 @@ enum RecipeMarkdownRecipeParser {
             return true
         }
 
-        return line == framework.title.uppercased()
+        let labels = [framework.title] + framework.legacyTitles
+        return labels.contains { line == $0.uppercased() }
     }
 
     private static func h1Title(from line: String) -> String? {

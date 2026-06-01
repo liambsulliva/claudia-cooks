@@ -29,6 +29,12 @@ struct FrameworkCardButton: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
+
+                Text(framework.dishExamples)
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(compact ? 16 : 24)
@@ -42,7 +48,7 @@ struct FrameworkCardButton: View {
 }
 
 #Preview {
-    FrameworkCardButton(framework: .salad)
+    FrameworkCardButton(framework: .handhelds)
         .padding()
         .frame(width: 280)
 }

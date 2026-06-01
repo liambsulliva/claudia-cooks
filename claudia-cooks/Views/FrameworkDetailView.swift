@@ -474,7 +474,7 @@ private enum FrameworkDetailScreenMode: String, CaseIterable, Identifiable {
 
     NavigationStack {
         FrameworkDetailView(
-            framework: .bowl,
+            framework: .bowls,
             sessionRecipeID: UUID(),
             libraryStore: libraryStore
         )
