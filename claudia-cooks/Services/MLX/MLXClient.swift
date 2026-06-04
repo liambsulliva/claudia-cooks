@@ -477,6 +477,57 @@ struct MLXClient: Sendable {
             .replacingOccurrences(of: "&", with: "and")
     }
 
+    private var preferredMeasurementSystem: CookingMeasurementSystem? {
+        CookingMeasurementPreferenceStore.preferredSystem
+    }
+
+    private var measurementSystemPromptSuffix: String {
+        guard let preferredMeasurementSystem else {
+            return ""
+        }
+
+        return "\n\(preferredMeasurementSystem.systemPromptInstruction)"
+    }
+
+    private var languagePromptSuffix: String {
+        guard let instruction = RecipeGenerationLanguagePreferenceStore.preferredLanguage.systemPromptInstruction else {
+            return ""
+        }
+
+        return "\n\(instruction)"
+    }
+
+    private var recipeGenerationPromptSuffix: String {
+        "\(languagePromptSuffix)\(measurementSystemPromptSuffix)"
+    }
+
+    private var recipeEditPromptSuffix: String {
+        let ingredientsSuffix = preferredGenerationLanguage.ingredientsSystemPromptInstruction
+            .map { "\n\($0)" } ?? ""
+        return "\(languagePromptSuffix)\(ingredientsSuffix)\(measurementSystemPromptSuffix)"
+    }
+
+    private var preferredGenerationLanguage: RecipeGenerationLanguage {
+        RecipeGenerationLanguagePreferenceStore.preferredLanguage
+    }
+
+    private var ingredientsLanguagePromptSuffix: String {
+        guard let instruction = preferredGenerationLanguage.ingredientsSystemPromptInstruction else {
+            return measurementSystemPromptSuffix
+        }
+
+        return "\n\(instruction)\(measurementSystemPromptSuffix)"
+    }
+
+    private var ingredientQuantityExampleHint: String {
+        preferredMeasurementSystem?.ingredientQuantityExampleHint
+            ?? "e.g. \"2\", \"1 tbsp\", \"200 g\""
+    }
+
+    private var ingredientJSONExample: String {
+        preferredGenerationLanguage.ingredientJSONExample(measurementSystem: preferredMeasurementSystem)
+    }
+
     private func titleSummarySystemPrompt(for framework: RecipeFramework) -> String {
         """
         You are a practical cooking assistant for home cooks.
@@ -484,7 +535,7 @@ struct MLXClient: Sendable {
         Write a concise recipe title and one-sentence summary for a \(framework.title.lowercased()) dish (\(framework.dishExamples)) from the user's selections.
         The title should sound like a real dish in this category, not a generic list of ingredients.
         Use only the selected ingredients plus common pantry staples such as salt, pepper, oil, water, and vinegar ONLY if applicable.
-        Do not invent unavailable specialty ingredients.
+        Do not invent unavailable specialty ingredients.\(recipeGenerationPromptSuffix)
         Reply with a single JSON object only. No markdown, no code fences, no commentary, no thinking tags.
         Required keys: title, summary.
         Example shape:
@@ -499,15 +550,15 @@ struct MLXClient: Sendable {
         Generate the ingredient list for a concise \(framework.title.lowercased()) dish (\(framework.dishExamples)) from the user's selections.
         List amounts appropriate to the dish style (e.g. enough broth for soup, enough bread for handhelds, enough starch for a bowl).
         Use only the selected ingredients plus common pantry staples such as salt, pepper, oil, water, and vinegar ONLY if applicable.
-        Do not invent unavailable specialty ingredients.
+        Do not invent unavailable specialty ingredients.\(ingredientsLanguagePromptSuffix)
         Reply with a single JSON object only. No markdown, no code fences, no commentary, no thinking tags.
         Required key: ingredients.
-        ingredients must be a JSON array of objects. Each object requires "name" (ingredient only, no amount, no variant, e.g. "chicken").
-        Include "quantity" (e.g. "2", "1 tbsp") and ensure that measurements are included when applicable to the ingredient.
-        Include "variant" only when a catalog ingredient has multiple types and you need to disambiguate which type you used (e.g. "breast"); omit it otherwise.
-        The app concatenates quantity, variant, and name for markdown in a natural order (e.g. quantity "2" + variant "breast" + name "chicken" → "2 chicken breasts").
+        ingredients must be a JSON array of objects. Each object requires "name" (ingredient only, no amount, no variant, e.g. "\(preferredGenerationLanguage.ingredientNameFieldExample)").
+        Include "quantity" (\(ingredientQuantityExampleHint)) and ensure that measurements are included when applicable to the ingredient.
+        Include "variant" only when a catalog ingredient has multiple types and you need to disambiguate which type you used (e.g. "\(preferredGenerationLanguage.ingredientVariantFieldExample)"); omit it otherwise.
+        The app concatenates quantity, variant, and name for markdown in a natural order (e.g. quantity "2" + variant "\(preferredGenerationLanguage.ingredientVariantFieldExample)" + name "\(preferredGenerationLanguage.ingredientNameFieldExample)").
         Example shape:
-        {"ingredients":[{"quantity":"2","name":"chicken","variant":"breast"},{"quantity":"2", "name":"garlic", "variant":"clove"},{"quantity":"1 tbsp","name":"olive oil"}]}
+        \(ingredientJSONExample)
         """
     }
 
@@ -532,6 +583,7 @@ struct MLXClient: Sendable {
         Write clear, safe, realistic cooking instructions for a \(framework.title.lowercased()) dish (\(framework.dishExamples)).
         Steps must follow the techniques and sequencing best suited to this category (e.g. assembly order for handhelds, simmer stages for soups, high-heat workflow for sautés).
         Use the provided ingredient list exactly; do not add new ingredients beyond common pantry staples already listed.
+        When mentioning amounts in steps, use the same measurement units as the ingredient list.\(recipeGenerationPromptSuffix)
         Reply with a single JSON object only. No markdown, no code fences, no commentary, no thinking tags.
         Required keys: steps, tips.
         steps and tips must be JSON arrays of strings.
@@ -553,7 +605,7 @@ struct MLXClient: Sendable {
 
         Use 1-based indexes. For replacements and removals, include the original text in "from".
         For additions and replacements, include the new text in "to".
-        Return only the smallest set of tool calls needed to satisfy the user's edit request.
+        Return only the smallest set of tool calls needed to satisfy the user's edit request.\(recipeEditPromptSuffix)
         """
     }
 
@@ -716,7 +768,13 @@ struct MLXClient: Sendable {
             ? ""
             : "\nUse only the selected ingredients, plus common pantry staples such as salt, pepper, oil, water, and vinegar ONLY when applicable."
 
-        let variantInstruction = variantSelectionPromptLines(for: selections, categories: framework.applicableCategories)
+        let variantInstruction = variantSelectionPromptLines(
+            for: selections,
+            categories: framework.applicableCategories,
+            language: preferredGenerationLanguage
+        )
+
+        let languageInstruction = ingredientsUserPromptLanguageInstruction
 
         let customInstruction = context.customPrompt.isEmpty
             ? ""
@@ -729,7 +787,7 @@ struct MLXClient: Sendable {
             Recipe title: \(sanitizePromptText(title))
             Summary: \(sanitizePromptText(summary))
 
-            Generate the ingredient list for this recipe.\(ingredientInstruction)\(variantInstruction)\(customInstruction)
+            Generate the ingredient list for this recipe.\(ingredientInstruction)\(variantInstruction)\(languageInstruction)\(customInstruction)
             Return one JSON object with key ingredients only.
             Each ingredient is an object with "name" (no amount), optional "quantity", and optional "variant" (only for typed catalog items).
             Start with { and end with }. Do not wrap the JSON in markdown.
@@ -737,9 +795,18 @@ struct MLXClient: Sendable {
         )
     }
 
+    private var ingredientsUserPromptLanguageInstruction: String {
+        guard let instruction = preferredGenerationLanguage.ingredientsSystemPromptInstruction else {
+            return ""
+        }
+
+        return "\n\(instruction)"
+    }
+
     private func variantSelectionPromptLines(
         for selections: RecipeSelections,
-        categories: [IngredientCategory]
+        categories: [IngredientCategory],
+        language: RecipeGenerationLanguage
     ) -> String {
         let lines = categories.flatMap { category -> [String] in
             selections.selectedOptions[category, default: []].compactMap { selection -> String? in
@@ -756,9 +823,13 @@ struct MLXClient: Sendable {
             return ""
         }
 
+        let variantLanguageClause = language == .english
+            ? "set \"variant\" on that ingredient object to match the user's chosen type:"
+            : "set \"variant\" on that ingredient object to the \(language.promptLanguageName) equivalent of the user's chosen type (translate from the English labels below):"
+
         return """
 
-        When an ingredient below has a chosen variant, set "variant" on that ingredient object to match:
+        When an ingredient below has a chosen variant, \(variantLanguageClause)
         \(lines.joined(separator: "\n"))
         """
     }

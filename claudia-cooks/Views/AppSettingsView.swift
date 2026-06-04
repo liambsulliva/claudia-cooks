@@ -324,9 +324,49 @@ private struct IngredientCatalogSettingsView: View {
 
 private struct GeneralSettingsView: View {
     @Environment(IngredientCatalogStore.self) private var ingredientCatalog
+    @State private var preferredMeasurementSystem = CookingMeasurementPreferenceStore.preferredSystem
+    @State private var preferredGenerationLanguage = RecipeGenerationLanguagePreferenceStore.preferredLanguage
 
     var body: some View {
         Form {
+            Section("Recipe Language") {
+                Text("Choose the language Claudia uses for titles, ingredients, steps, and tips.")
+                    .foregroundStyle(.secondary)
+
+                Picker("Generation language", selection: $preferredGenerationLanguage) {
+                    ForEach(RecipeGenerationLanguage.allCases) { language in
+                        Text(language.settingsTitle).tag(language)
+                    }
+                }
+                .pickerStyle(.menu)
+                .onChange(of: preferredGenerationLanguage) { _, newValue in
+                    RecipeGenerationLanguagePreferenceStore.preferredLanguage = newValue
+                }
+            }
+
+            Section("Recipe Measurements") {
+                Text("Choose which units Claudia uses when generating ingredient amounts and step measurements.")
+                    .foregroundStyle(.secondary)
+
+                Picker("Measurement units", selection: $preferredMeasurementSystem) {
+                    Text("No preference").tag(Optional<CookingMeasurementSystem>.none)
+
+                    ForEach(CookingMeasurementSystem.allCases) { system in
+                        Text(system.settingsTitle).tag(Optional(system))
+                    }
+                }
+                .pickerStyle(.radioGroup)
+                .onChange(of: preferredMeasurementSystem) { _, newValue in
+                    CookingMeasurementPreferenceStore.preferredSystem = newValue
+                }
+
+                if let preferredMeasurementSystem {
+                    Text(preferredMeasurementSystem.settingsDetail)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             Section("Ingredient Catalog") {
                 Text("Catalog edits are saved locally and update the builder, variant menus, recipe prompts, and ingredient graph matching.")
                     .foregroundStyle(.secondary)
