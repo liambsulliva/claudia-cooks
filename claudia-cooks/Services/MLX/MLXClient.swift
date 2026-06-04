@@ -171,39 +171,47 @@ struct MLXClient: Sendable {
         recipe.tips = instructionsRecipe.tips
         onPartialResponse?(recipe)
 
-        let macrosResponse = try await streamChatResponse(
-            container: container,
-            instructions: macrosSystemPrompt(for: framework),
-            userMessage: macrosUserPrompt(
-                framework: framework,
-                selections: selections,
-                ingredients: recipe.ingredients,
-                title: recipe.title,
-                summary: recipe.summary
-            ),
-            maxTokens: 140
-        ) { partialText in
-            guard let partial = GeneratedRecipe.decodePartialAssistantResponse(partialText),
-                  let partialMacros = partial.macros else {
-                return
+        if MacroCalculationsPreferenceStore.isEnabled {
+            let macrosResponse = try await streamChatResponse(
+                container: container,
+                instructions: macrosSystemPrompt(for: framework),
+                userMessage: macrosUserPrompt(
+                    framework: framework,
+                    selections: selections,
+                    ingredients: recipe.ingredients,
+                    title: recipe.title,
+                    summary: recipe.summary
+                ),
+                maxTokens: 140
+            ) { partialText in
+                guard let partial = GeneratedRecipe.decodePartialAssistantResponse(partialText),
+                      let partialMacros = partial.macros else {
+                    return
+                }
+
+                var merged = recipe.macros ?? RecipeMacros()
+                merged.merge(partialMacros)
+                recipe.macros = merged
+                onPartialResponse?(recipe)
             }
 
-            var merged = recipe.macros ?? RecipeMacros()
-            merged.merge(partialMacros)
-            recipe.macros = merged
-            onPartialResponse?(recipe)
+            guard let macrosRecipe = GeneratedRecipe.decodePartialAssistantResponse(macrosResponse),
+                  let macros = macrosRecipe.macros,
+                  macros.hasMinimumContent else {
+                throw MLXClientError.invalidRecipePayload
+            }
+
+            recipe.macros = macros
         }
 
-        guard let macrosRecipe = GeneratedRecipe.decodePartialAssistantResponse(macrosResponse),
-              let macros = macrosRecipe.macros,
-              macros.hasMinimumContent else {
+        guard recipe.hasMinimumRecipeContent else {
             throw MLXClientError.invalidRecipePayload
         }
 
-        recipe.macros = macros
-
-        guard recipe.hasMinimumRecipeContent, recipe.hasMinimumMacrosContent else {
-            throw MLXClientError.invalidRecipePayload
+        if MacroCalculationsPreferenceStore.isEnabled {
+            guard recipe.hasMinimumMacrosContent else {
+                throw MLXClientError.invalidRecipePayload
+            }
         }
 
         onPartialResponse?(recipe)

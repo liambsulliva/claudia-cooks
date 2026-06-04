@@ -326,9 +326,20 @@ private struct GeneralSettingsView: View {
     @Environment(IngredientCatalogStore.self) private var ingredientCatalog
     @State private var preferredMeasurementSystem = CookingMeasurementPreferenceStore.preferredSystem
     @State private var preferredGenerationLanguage = RecipeGenerationLanguagePreferenceStore.preferredLanguage
+    @State private var macroCalculationsEnabled = MacroCalculationsPreferenceStore.isEnabled
 
     var body: some View {
         Form {
+            Section("Nutrition") {
+                Text("When enabled, Claudia estimates per-serving calories, protein, carbs, and fat after generating the recipe.")
+                    .foregroundStyle(.secondary)
+
+                Toggle("Macro calculations", isOn: $macroCalculationsEnabled)
+                    .onChange(of: macroCalculationsEnabled) { _, newValue in
+                        MacroCalculationsPreferenceStore.isEnabled = newValue
+                    }
+            }
+
             Section("Recipe Language") {
                 Text("Choose the language Claudia uses for titles, ingredients, steps, and tips.")
                     .foregroundStyle(.secondary)
