@@ -29,6 +29,24 @@ enum MLXModelTier: String, CaseIterable, Codable, Identifiable, Sendable {
         }
     }
 
+    var settingsTitle: String {
+        switch self {
+        case .fast:
+            "Qwen3 1.7B"
+        case .fastest:
+            "Qwen3 0.6B"
+        }
+    }
+
+    var settingsDetail: String {
+        switch self {
+        case .fast:
+            "Default recipe model with the best balance of speed and quality."
+        case .fastest:
+            "Smallest supported recipe model for the fastest local generation."
+        }
+    }
+
     var modelName: String {
         switch self {
         case .fast:

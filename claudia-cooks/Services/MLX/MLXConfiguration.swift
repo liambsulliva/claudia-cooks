@@ -16,12 +16,36 @@ struct MLXConfiguration: Sendable {
 
     let downloadPatterns = ["*.safetensors", "*.json", "*.jinja"]
 
+    var builtInModelNames: [String] {
+        [defaultModel, lowMemoryModel]
+    }
+
     func resolvedModel(for load: MLXSystemLoad, preferredTier: MLXModelTier?) -> String {
-        if let preferredTier {
-            return preferredTier.modelName
+        resolvedModel(for: load, preferredModelName: preferredTier?.modelName)
+    }
+
+    func resolvedModel(for load: MLXSystemLoad, preferredModelName: String?) -> String {
+        if let preferredModelName {
+            return preferredModelName
         }
 
-        return load.shouldUseLowMemoryMode ? lowMemoryModel : defaultModel
+        return defaultModel(for: load)
+    }
+
+    func defaultModel(for load: MLXSystemLoad) -> String {
+        load.shouldUseLowMemoryMode ? lowMemoryModel : defaultModel
+    }
+
+    func alternateBuiltInModelName(for modelName: String) -> String? {
+        guard builtInModelNames.contains(modelName) else {
+            return nil
+        }
+
+        if modelName == lowMemoryModel {
+            return defaultModel
+        } else {
+            return lowMemoryModel
+        }
     }
 
     func repoID(for modelName: String) throws -> Repo.ID {

@@ -13,12 +13,17 @@ struct AppSettingsView: View {
                     Label("Ingredients", systemImage: "carrot.fill")
                 }
 
+            ModelSettingsView()
+                .tabItem {
+                    Label("Models", systemImage: "cpu")
+                }
+
             GeneralSettingsView()
                 .tabItem {
                     Label("General", systemImage: "gearshape")
                 }
         }
-        .frame(width: 760, height: 560)
+        .frame(width: 780, height: 620)
     }
 }
 

@@ -52,6 +52,15 @@ final class RecipeGenerationService {
         _ = await refreshAvailability()
     }
 
+    func downloadModel(
+        named modelName: String,
+        progress: (@Sendable (MLXModelDownloadProgress) -> Void)? = nil
+    ) async throws {
+        MLXModelPreferenceStore.preferredModelName = modelName
+        try await mlx.downloadModel(modelName, progressHandler: progress)
+        _ = await refreshAvailability()
+    }
+
     func generateRecipe(
         framework: RecipeFramework,
         selections: RecipeSelections,
@@ -117,7 +126,7 @@ final class RecipeGenerationService {
         case .modelNotDownloaded(let missingModel):
             """
             \(missingModel) is not downloaded yet. \
-            Choose an MLX model size to download and keep the preview on your current selections until it is ready.
+            Open Settings > Models to download it or choose an installed model.
             """
         }
     }

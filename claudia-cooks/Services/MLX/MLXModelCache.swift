@@ -45,4 +45,63 @@ actor MLXModelCache {
         loadedContainer = container
         return container
     }
+
+    func isModelDownloaded(
+        modelName: String,
+        configuration: MLXConfiguration
+    ) async -> Bool {
+        do {
+            _ = try await localModelDirectory(modelName: modelName, configuration: configuration)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    func removeModel(
+        modelName: String,
+        configuration: MLXConfiguration
+    ) async throws -> Bool {
+        let modelDirectory: URL
+        do {
+            modelDirectory = try await localModelDirectory(modelName: modelName, configuration: configuration)
+        } catch {
+            return false
+        }
+
+        if loadedModelName == modelName {
+            loadedModelName = nil
+            loadedContainer = nil
+        }
+
+        let removalURL = cacheDirectoryToRemove(containing: modelDirectory)
+        try FileManager.default.removeItem(at: removalURL)
+        return true
+    }
+
+    private func localModelDirectory(
+        modelName: String,
+        configuration: MLXConfiguration
+    ) async throws -> URL {
+        let repoID = try configuration.repoID(for: modelName)
+        return try await HubClient.default.downloadSnapshot(
+            of: repoID,
+            revision: "main",
+            matching: configuration.downloadPatterns,
+            localFilesOnly: true,
+            maxConcurrentDownloads: 1
+        )
+    }
+
+    private func cacheDirectoryToRemove(containing modelDirectory: URL) -> URL {
+        let snapshotDirectory = modelDirectory.deletingLastPathComponent()
+        let repositoryDirectory = snapshotDirectory.deletingLastPathComponent()
+
+        if snapshotDirectory.lastPathComponent == "snapshots",
+           repositoryDirectory.lastPathComponent.hasPrefix("models--") {
+            return repositoryDirectory
+        }
+
+        return modelDirectory
+    }
 }

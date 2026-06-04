@@ -27,8 +27,12 @@ struct MLXClient: Sendable {
         MLXModelPreferenceStore.preferredTier
     }
 
+    var preferredModelName: String? {
+        MLXModelPreferenceStore.preferredModelName
+    }
+
     var activeModel: String {
-        configuration.resolvedModel(for: systemLoad, preferredTier: preferredTier)
+        configuration.resolvedModel(for: systemLoad, preferredModelName: preferredModelName)
     }
 
     var isFastestModel: Bool {
@@ -59,6 +63,33 @@ struct MLXClient: Sendable {
             modelName: modelName,
             configuration: configuration,
             progressHandler: progressHandler
+        )
+    }
+
+    func isModelDownloaded(_ modelName: String) async -> Bool {
+        await modelCache.isModelDownloaded(
+            modelName: modelName,
+            configuration: configuration
+        )
+    }
+
+    func downloadedModels(in modelNames: [String]) async -> Set<String> {
+        var downloaded: Set<String> = []
+
+        for modelName in modelNames {
+            if await isModelDownloaded(modelName) {
+                downloaded.insert(modelName)
+            }
+        }
+
+        return downloaded
+    }
+
+    @discardableResult
+    func removeDownloadedModel(_ modelName: String) async throws -> Bool {
+        try await modelCache.removeModel(
+            modelName: modelName,
+            configuration: configuration
         )
     }
 
@@ -446,20 +477,16 @@ struct MLXClient: Sendable {
             return activeModel
         }
 
-        let alternate = alternateModelName(for: activeModel)
+        guard !MLXModelPreferenceStore.hasExplicitPreferredModel,
+              let alternate = configuration.alternateBuiltInModelName(for: activeModel) else {
+            return nil
+        }
+
         if await isModelAvailable(alternate) {
             return alternate
         }
 
         return nil
-    }
-
-    private func alternateModelName(for modelName: String) -> String {
-        if modelName == configuration.lowMemoryModel {
-            configuration.defaultModel
-        } else {
-            configuration.lowMemoryModel
-        }
     }
 
     private func isModelAvailable(_ modelName: String) async -> Bool {
