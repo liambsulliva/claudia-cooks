@@ -335,4 +335,5 @@ struct IngredientBentoGrid: View {
     )
     .padding()
     .frame(width: 560)
+    .environment(IngredientCatalogStore())
 }

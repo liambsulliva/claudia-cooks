@@ -6,6 +6,8 @@
 import SwiftUI
 
 struct IngredientCategorySection: View {
+    @Environment(IngredientCatalogStore.self) private var ingredientCatalog
+
     let category: IngredientCategory
     @Binding var openVariantMenu: (category: IngredientCategory, option: String)?
     let selectionState: (String) -> IngredientOptionSelectionState
@@ -31,7 +33,7 @@ struct IngredientCategorySection: View {
 
             GlassEffectContainer(spacing: 8) {
                 VStack(alignment: .leading, spacing: 12) {
-                    ForEach(IngredientCatalog.optionGroups(for: category), id: \.subgroup) { group in
+                    ForEach(ingredientCatalog.optionGroups(for: category), id: \.subgroup) { group in
                         VStack(alignment: .leading, spacing: 8) {
                             Text(group.subgroup)
                                 .font(.caption.weight(.semibold))
@@ -115,4 +117,5 @@ struct IngredientCategorySection: View {
     )
     .padding()
     .frame(width: 260)
+    .environment(IngredientCatalogStore())
 }

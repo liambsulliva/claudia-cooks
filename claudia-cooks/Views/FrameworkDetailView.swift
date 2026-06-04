@@ -508,4 +508,5 @@ private enum FrameworkDetailScreenMode: String, CaseIterable, Identifiable {
             )
     }
     .environment(libraryStore)
+    .environment(IngredientCatalogStore())
 }

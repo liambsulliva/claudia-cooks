@@ -50,6 +50,7 @@ enum RecipeMarkdownRecipeParser {
             }
         }
 
+        let macros = RecipeMacros.parse(markdownLines: parseUnorderedList(sections[.nutrition] ?? []))
         let ingredients = parseUnorderedList(sections[.ingredients] ?? [])
         let steps = parseOrderedList(sections[.steps] ?? [])
         let tips = parseUnorderedList(sections[.tips] ?? [])
@@ -61,6 +62,7 @@ enum RecipeMarkdownRecipeParser {
         let recipe = GeneratedRecipe(
             title: title.isEmpty ? "Untitled Recipe" : title,
             summary: summary,
+            macros: macros,
             ingredients: ingredients,
             steps: steps,
             tips: tips
@@ -136,10 +138,12 @@ enum RecipeMarkdownRecipeParser {
         return normalized == "no ingredients generated yet."
             || normalized == "no steps generated yet."
             || normalized == "no tips generated yet."
+            || normalized == "no nutrition generated yet."
     }
 }
 
 private enum RecipeSection: String {
+    case nutrition
     case ingredients
     case steps
     case tips
@@ -151,6 +155,8 @@ private enum RecipeSection: String {
             .lowercased()
 
         switch normalized {
+        case "nutrition (per serving)", "nutrition", "macros", "macro":
+            self = .nutrition
         case "ingredients":
             self = .ingredients
         case "steps", "instructions", "method":

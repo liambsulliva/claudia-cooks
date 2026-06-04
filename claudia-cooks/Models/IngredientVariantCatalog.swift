@@ -6,7 +6,7 @@
 import Foundation
 
 enum IngredientVariantCatalog {
-    private static let variantsByBase: [String: [String]] = [
+    static let defaultVariantsByBase: [String: [String]] = [
         // Protein — meat
         "Chicken": ["Breast", "Thigh", "Whole", "Ground", "Wings"],
         "Beef": ["Ground", "Steak", "Brisket", "Chuck", "Stew Meat"],
@@ -49,10 +49,7 @@ enum IngredientVariantCatalog {
     ]
 
     static func variants(for baseOption: String) -> [String]? {
-        guard let variants = variantsByBase[baseOption], !variants.isEmpty else {
-            return nil
-        }
-        return variants
+        IngredientCatalogStore.shared.variants(for: baseOption)
     }
 }
 

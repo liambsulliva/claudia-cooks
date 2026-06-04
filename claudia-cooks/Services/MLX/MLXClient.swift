@@ -80,6 +80,7 @@ struct MLXClient: Sendable {
         var recipe = GeneratedRecipe(
             title: "Generating recipe…",
             summary: "",
+            macros: nil,
             ingredients: [],
             steps: [],
             tips: []
@@ -168,8 +169,40 @@ struct MLXClient: Sendable {
 
         recipe.steps = instructionsRecipe.steps
         recipe.tips = instructionsRecipe.tips
+        onPartialResponse?(recipe)
 
-        guard recipe.hasMinimumRecipeContent else {
+        let macrosResponse = try await streamChatResponse(
+            container: container,
+            instructions: macrosSystemPrompt(for: framework),
+            userMessage: macrosUserPrompt(
+                framework: framework,
+                selections: selections,
+                ingredients: recipe.ingredients,
+                title: recipe.title,
+                summary: recipe.summary
+            ),
+            maxTokens: 140
+        ) { partialText in
+            guard let partial = GeneratedRecipe.decodePartialAssistantResponse(partialText),
+                  let partialMacros = partial.macros else {
+                return
+            }
+
+            var merged = recipe.macros ?? RecipeMacros()
+            merged.merge(partialMacros)
+            recipe.macros = merged
+            onPartialResponse?(recipe)
+        }
+
+        guard let macrosRecipe = GeneratedRecipe.decodePartialAssistantResponse(macrosResponse),
+              let macros = macrosRecipe.macros,
+              macros.hasMinimumContent else {
+            throw MLXClientError.invalidRecipePayload
+        }
+
+        recipe.macros = macros
+
+        guard recipe.hasMinimumRecipeContent, recipe.hasMinimumMacrosContent else {
             throw MLXClientError.invalidRecipePayload
         }
 
@@ -478,6 +511,20 @@ struct MLXClient: Sendable {
         """
     }
 
+    private func macrosSystemPrompt(for framework: RecipeFramework) -> String {
+        """
+        You are a practical cooking assistant for home cooks.
+        \(framework.mlxCategoryGuidance)
+        Estimate nutrition for a \(framework.title.lowercased()) dish (\(framework.dishExamples)) from its title, summary, and ingredient list.
+        Use realistic home-cook portion sizes. Prefer yields of 2–4 servings unless the dish clearly serves more or less.
+        Return approximate per-serving values as whole numbers (round calories to the nearest 5 when helpful).
+        Reply with a single JSON object only. No markdown, no code fences, no commentary, no thinking tags.
+        Required keys: servings, calories, protein_g, carbs_g, fat_g.
+        Example shape:
+        {"servings":4,"calories":520,"protein_g":38,"carbs_g":42,"fat_g":22}
+        """
+    }
+
     private func instructionsSystemPrompt(for framework: RecipeFramework) -> String {
         """
         You are a practical cooking assistant for home cooks.
@@ -714,6 +761,35 @@ struct MLXClient: Sendable {
         When an ingredient below has a chosen variant, set "variant" on that ingredient object to match:
         \(lines.joined(separator: "\n"))
         """
+    }
+
+    private func macrosUserPrompt(
+        framework: RecipeFramework,
+        selections: RecipeSelections,
+        ingredients: [String],
+        title: String,
+        summary: String
+    ) -> String {
+        let context = sharedPromptSections(framework: framework, selections: selections)
+        let ingredientList = ingredients
+            .map { "- \(sanitizePromptText($0))" }
+            .joined(separator: "\n")
+
+        return sanitizePromptText(
+            """
+            \(context.sections.joined(separator: "\n\n"))
+
+            Recipe title: \(sanitizePromptText(title))
+            Summary: \(sanitizePromptText(summary))
+
+            Ingredients:
+            \(ingredientList)
+
+            Estimate per-serving nutrition for this recipe.
+            Return one JSON object with keys servings, calories, protein_g, carbs_g, and fat_g only.
+            Start with { and end with }. Do not wrap the JSON in markdown.
+            """
+        )
     }
 
     private func instructionsUserPrompt(

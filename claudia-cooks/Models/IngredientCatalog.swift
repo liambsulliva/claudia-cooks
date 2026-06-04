@@ -3,13 +3,13 @@
 //  claudia-cooks
 //
 
-struct IngredientOptionGroup: Hashable {
-    let subgroup: String
-    let options: [String]
+struct IngredientOptionGroup: Hashable, Codable {
+    var subgroup: String
+    var options: [String]
 }
 
 enum IngredientCatalog {
-    static func optionGroups(for category: IngredientCategory) -> [IngredientOptionGroup] {
+    static func defaultOptionGroups(for category: IngredientCategory) -> [IngredientOptionGroup] {
         switch category {
         case .protein:
             [
@@ -134,6 +134,10 @@ enum IngredientCatalog {
                 ),
             ]
         }
+    }
+
+    static func optionGroups(for category: IngredientCategory) -> [IngredientOptionGroup] {
+        IngredientCatalogStore.shared.optionGroups(for: category)
     }
 
     static func options(for category: IngredientCategory) -> [String] {

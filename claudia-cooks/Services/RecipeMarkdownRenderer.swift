@@ -19,7 +19,9 @@ enum RecipeMarkdownRenderer {
                 section("Steps"),
                 numbered(recipe.steps, emptyMessage: "No steps generated yet."),
                 section("Tips"),
-                bullets(recipe.tips, emptyMessage: "No tips generated yet.")
+                bullets(recipe.tips, emptyMessage: "No tips generated yet."),
+                section("Nutrition"),
+                bullets(recipe.macros?.markdownLines ?? [], emptyMessage: "No nutrition generated yet.")
             ]
         }
     }

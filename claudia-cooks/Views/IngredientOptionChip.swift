@@ -6,6 +6,8 @@
 import SwiftUI
 
 struct IngredientOptionChip: View {
+    @Environment(IngredientCatalogStore.self) private var ingredientCatalog
+
     let option: String
     let category: IngredientCategory
     let selectionState: IngredientOptionSelectionState
@@ -19,7 +21,7 @@ struct IngredientOptionChip: View {
     @State private var chipGlobalFrame: CGRect = .zero
 
     private var variants: [String]? {
-        IngredientCatalog.variants(for: option)
+        ingredientCatalog.variants(for: option)
     }
 
     private var isActive: Bool {

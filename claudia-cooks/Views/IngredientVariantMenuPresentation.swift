@@ -69,6 +69,8 @@ private struct IngredientVariantMenuHostFrameKey: PreferenceKey {
 }
 
 struct IngredientVariantMenuHost: ViewModifier {
+    @Environment(IngredientCatalogStore.self) private var ingredientCatalog
+
     let selectionState: (String, IngredientCategory) -> IngredientOptionSelectionState
     let onToggleVariant: (String, String, IngredientCategory) -> Void
     let onDismiss: () -> Void
@@ -122,7 +124,7 @@ struct IngredientVariantMenuHost: ViewModifier {
 
     @ViewBuilder
     private func variantMenu(for presentation: IngredientVariantMenuPresentation) -> some View {
-        if let variants = IngredientCatalog.variants(for: presentation.option) {
+        if let variants = ingredientCatalog.variants(for: presentation.option) {
             let selection = selectionState(presentation.option, presentation.category)
 
             GlassEffectContainer(spacing: 8) {
@@ -186,7 +188,7 @@ struct IngredientVariantMenuHost: ViewModifier {
            let dragGlobalLocation = presentation.dragGlobalLocation,
            variantName(
                atGlobalPoint: dragGlobalLocation,
-               variants: IngredientCatalog.variants(for: presentation.option) ?? []
+                   variants: ingredientCatalog.variants(for: presentation.option) ?? []
            ) == variant {
             return true
         }

@@ -18,6 +18,10 @@ extension GeneratedRecipe {
         hasMinimumTitleSummaryContent && hasMinimumIngredientsListContent
     }
 
+    var hasMinimumMacrosContent: Bool {
+        macros?.hasMinimumContent == true
+    }
+
     var hasMinimumInstructionsContent: Bool {
         !steps.isEmpty
     }
@@ -62,16 +66,18 @@ extension GeneratedRecipe {
         let summary = extractJSONStringField("summary", from: trimmed)
         let ingredientEntries = extractJSONIngredientEntriesField("ingredients", from: trimmed)
         let ingredients = ingredientEntries.map(\.displayLine)
+        let macros = extractJSONMacros(from: trimmed)
         let steps = extractJSONStringArrayField("steps", from: trimmed)
         let tips = extractJSONStringArrayField("tips", from: trimmed)
 
-        guard title != nil || summary != nil || !ingredients.isEmpty || !steps.isEmpty || !tips.isEmpty else {
+        guard title != nil || summary != nil || macros != nil || !ingredients.isEmpty || !steps.isEmpty || !tips.isEmpty else {
             return nil
         }
 
         let recipe = GeneratedRecipe(
             title: title ?? "Generating recipe…",
             summary: summary ?? "",
+            macros: macros,
             ingredients: ingredients,
             ingredientEntries: ingredientEntries,
             steps: steps,
@@ -269,21 +275,83 @@ extension GeneratedRecipe {
         let summary = stringValue(from: object["summary"])
         let ingredientEntries = ingredientEntries(from: object["ingredients"])
         let ingredients = ingredientEntries.map(\.displayLine)
+        let macros = macrosValue(from: object)
         let steps = stringArray(from: object["steps"])
         let tips = stringArray(from: object["tips"])
 
-        guard title != nil || summary != nil || !ingredients.isEmpty || !steps.isEmpty || !tips.isEmpty else {
+        guard title != nil || summary != nil || macros != nil || !ingredients.isEmpty || !steps.isEmpty || !tips.isEmpty else {
             return nil
         }
 
         return GeneratedRecipe(
             title: title ?? "Untitled Recipe",
             summary: summary ?? "",
+            macros: macros,
             ingredients: ingredients,
             ingredientEntries: ingredientEntries,
             steps: steps,
             tips: tips
         )
+    }
+
+    private static func macrosValue(from object: [String: Any]) -> RecipeMacros? {
+        if let nested = object["macros"] as? [String: Any],
+           let macros = RecipeMacros.parsingJSONObject(nested) {
+            return macros
+        }
+
+        return RecipeMacros.parsingJSONObject(object)
+    }
+
+    private static func extractJSONMacros(from text: String) -> RecipeMacros? {
+        if let nestedBody = extractJSONObjectFieldBody("macros", from: text),
+           let data = "{\(nestedBody)}".data(using: .utf8),
+           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let macros = RecipeMacros.parsingJSONObject(object) {
+            return macros
+        }
+
+        var object: [String: Any] = [:]
+        if let servings = extractJSONIntField("servings", from: text) {
+            object["servings"] = servings
+        }
+        if let calories = extractJSONIntField("calories", from: text) {
+            object["calories"] = calories
+        }
+        if let protein = extractJSONIntField("protein_g", from: text) ?? extractJSONIntField("protein", from: text) {
+            object["protein_g"] = protein
+        }
+        if let carbs = extractJSONIntField("carbs_g", from: text) ?? extractJSONIntField("carbs", from: text) {
+            object["carbs_g"] = carbs
+        }
+        if let fat = extractJSONIntField("fat_g", from: text) ?? extractJSONIntField("fat", from: text) {
+            object["fat_g"] = fat
+        }
+
+        return RecipeMacros.parsingJSONObject(object)
+    }
+
+    private static func extractJSONObjectFieldBody(_ field: String, from text: String) -> String? {
+        let pattern = #""\#(field)"\s*:\s*\{(.*)\}"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.dotMatchesLineSeparators]),
+              let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+              let bodyRange = Range(match.range(at: 1), in: text) else {
+            return nil
+        }
+
+        return String(text[bodyRange])
+    }
+
+    private static func extractJSONIntField(_ field: String, from text: String) -> Int? {
+        let intPattern = #""\#(field)"\s*:\s*(\d+)"#
+        if let regex = try? NSRegularExpression(pattern: intPattern),
+           let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+           let valueRange = Range(match.range(at: 1), in: text),
+           let value = Int(text[valueRange]) {
+            return value
+        }
+
+        return nil
     }
 
     private static func ingredientEntries(from value: Any?) -> [GeneratedIngredient] {

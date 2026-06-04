@@ -97,5 +97,6 @@ private struct BuilderMinimumWindowSize: ViewModifier {
 #Preview {
     ContentView()
         .environment(RecipeLibraryStore())
+        .environment(IngredientCatalogStore())
         .frame(width: 800, height: 700)
 }
